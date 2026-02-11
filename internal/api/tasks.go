@@ -86,6 +86,14 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		s.replayTask(w, r, id)
 		return
 	}
+	if len(parts) == 2 && parts[1] == "replay_chain" {
+		if r.Method != http.MethodGet {
+			httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+		s.getReplayChain(w, r, id)
+		return
+	}
 
 	http.NotFound(w, r)
 }
@@ -211,6 +219,55 @@ func (s *Server) enqueueCreatedTask(r *http.Request, created task.Task) (task.Ta
 		return failed, http.StatusInternalServerError, false
 	}
 	return created, http.StatusAccepted, true
+}
+
+func (s *Server) getReplayChain(w http.ResponseWriter, r *http.Request, id string) {
+	maxDepth := 20
+	if raw := strings.TrimSpace(r.URL.Query().Get("max_depth")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			httpx.WriteError(w, http.StatusBadRequest, "invalid_max_depth", "max_depth must be a positive integer")
+			return
+		}
+		if parsed > 100 {
+			parsed = 100
+		}
+		maxDepth = parsed
+	}
+
+	chain := make([]task.Task, 0, maxDepth)
+	visited := make(map[string]struct{}, maxDepth)
+	nextID := strings.TrimSpace(id)
+	truncated := false
+
+	for len(chain) < maxDepth && nextID != "" {
+		if _, seen := visited[nextID]; seen {
+			truncated = true
+			break
+		}
+		visited[nextID] = struct{}{}
+
+		found, err := s.tasks.Get(r.Context(), nextID)
+		if err != nil {
+			if len(chain) == 0 {
+				httpx.WriteError(w, http.StatusNotFound, "not_found", err.Error())
+				return
+			}
+			truncated = true
+			break
+		}
+		chain = append(chain, found)
+		nextID = strings.TrimSpace(found.SourceTaskID)
+	}
+
+	if nextID != "" && len(chain) >= maxDepth {
+		truncated = true
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"tasks":     chain,
+		"truncated": truncated,
+	})
 }
 
 func (s *Server) listRecentTasks(w http.ResponseWriter, r *http.Request) {

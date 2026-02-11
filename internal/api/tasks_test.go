@@ -420,3 +420,84 @@ func TestReplayTaskRejectsConflictingSessionInputs(t *testing.T) {
 		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestReplayChain(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	svc := task.NewInMemoryService()
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	root, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID:  "sess_root",
+		URL:        "https://example.com",
+		Goal:       "root",
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("create root task: %v", err)
+	}
+
+	replayReq := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+root.ID+"/replay", nil)
+	replayRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(replayRR, replayReq)
+	if replayRR.Code != http.StatusAccepted {
+		t.Fatalf("replay expected 202, got %d body=%s", replayRR.Code, replayRR.Body.String())
+	}
+	var child task.Task
+	if err := json.Unmarshal(replayRR.Body.Bytes(), &child); err != nil {
+		t.Fatalf("decode replay child: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/"+child.ID+"/replay_chain?max_depth=5", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Tasks     []task.Task `json:"tasks"`
+		Truncated bool        `json:"truncated"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode replay chain response: %v", err)
+	}
+	if payload.Truncated {
+		t.Fatalf("expected non-truncated chain")
+	}
+	if len(payload.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks in chain, got %d", len(payload.Tasks))
+	}
+	if payload.Tasks[0].ID != child.ID {
+		t.Fatalf("expected first chain task %s, got %s", child.ID, payload.Tasks[0].ID)
+	}
+	if payload.Tasks[1].ID != root.ID {
+		t.Fatalf("expected second chain task %s, got %s", root.ID, payload.Tasks[1].ID)
+	}
+}
+
+func TestReplayChainInvalidDepth(t *testing.T) {
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		nil,
+		1,
+		"",
+		nil,
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/task_1/replay_chain?max_depth=zero", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}

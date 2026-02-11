@@ -941,6 +941,7 @@
       filteredTasks: [],
       selectedTaskID: "",
       lastCreatedTaskID: "",
+      replayChains: {},
       refreshMs: 3000,
       taskLimit: 120,
       isLive: true,
@@ -1058,6 +1059,52 @@
       const text = String(value || "");
       if (text.length <= max) return text;
       return text.slice(0, max - 3) + "...";
+    }
+
+    function replayChainSummary(chainState) {
+      if (!chainState) return "not loaded";
+      if (chainState.loading) return "loading...";
+      if (chainState.error) return "unavailable: " + chainState.error;
+      if (!Array.isArray(chainState.tasks) || !chainState.tasks.length) return "-";
+      const rendered = chainState.tasks
+        .map((item) => compactText(item.id || "-", 16))
+        .join(" <- ");
+      return chainState.truncated ? rendered + " <- ..." : rendered;
+    }
+
+    async function loadReplayChain(taskID) {
+      const id = String(taskID || "").trim();
+      if (!id) return;
+      const existing = state.replayChains[id];
+      if (existing && (existing.loading || existing.loaded)) return;
+
+      state.replayChains[id] = { loading: true, loaded: false, tasks: [], truncated: false, error: "" };
+      if (state.selectedTaskID === id) {
+        renderDetail();
+      }
+
+      try {
+        const payload = await requestJSON('/v1/tasks/' + encodeURIComponent(id) + '/replay_chain?max_depth=20');
+        state.replayChains[id] = {
+          loading: false,
+          loaded: true,
+          tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
+          truncated: Boolean(payload.truncated),
+          error: ""
+        };
+      } catch (error) {
+        state.replayChains[id] = {
+          loading: false,
+          loaded: true,
+          tasks: [],
+          truncated: false,
+          error: error.message
+        };
+      }
+
+      if (state.selectedTaskID === id) {
+        renderDetail();
+      }
     }
 
     function updateClock() {
@@ -1207,6 +1254,8 @@
       const sourceTask = task.source_task_id
         ? '<button type="button" class="link-btn" data-select-task-id="' + escapeHTML(task.source_task_id) + '">' + escapeHTML(task.source_task_id) + '</button>'
         : '-';
+      const chainState = state.replayChains[task.id || ""];
+      const chainText = replayChainSummary(chainState);
 
       taskDetailEl.innerHTML = (
         '<div class="detail-header">' +
@@ -1219,6 +1268,7 @@
         '<div class="detail-list">' +
           '<div class="pair"><span class="k">Goal</span><span class="v">' + escapeHTML(task.goal || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Source Task</span><span class="v">' + sourceTask + '</span></div>' +
+          '<div class="pair"><span class="k">Replay Chain</span><span class="v mono">' + escapeHTML(chainText) + '</span></div>' +
           '<div class="pair"><span class="k">URL</span><span class="v">' + escapeHTML(task.url || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Final URL</span><span class="v">' + escapeHTML(task.final_url || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Node ID</span><span class="v mono">' + escapeHTML(task.node_id || '-') + '</span></div>' +
@@ -1254,6 +1304,10 @@
           renderTaskTable();
           renderDetail();
         });
+      }
+
+      if (!chainState || (!chainState.loading && !chainState.loaded)) {
+        void loadReplayChain(task.id || "");
       }
     }
 
