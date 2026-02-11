@@ -47,6 +47,8 @@ type Task struct {
 	FinalURL              string     `json:"final_url,omitempty"`
 	ScreenshotBase64      string     `json:"screenshot_base64,omitempty"`
 	ScreenshotArtifactURL string     `json:"screenshot_artifact_url,omitempty"`
+	BlockerType           string     `json:"blocker_type,omitempty"`
+	BlockerMessage        string     `json:"blocker_message,omitempty"`
 	ErrorMessage          string     `json:"error_message,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
 	StartedAt             *time.Time `json:"started_at,omitempty"`
@@ -92,6 +94,8 @@ type FailInput struct {
 	FinalURL              string
 	Screenshot            string
 	ScreenshotArtifactURL string
+	BlockerType           string
+	BlockerMessage        string
 }
 
 type Service interface {
@@ -166,6 +170,8 @@ func (s *InMemoryService) Start(_ context.Context, input StartInput) (Task, erro
 	task.StartedAt = &now
 	task.NextRetryAt = nil
 	task.ErrorMessage = ""
+	task.BlockerType = ""
+	task.BlockerMessage = ""
 	s.items[input.TaskID] = task
 	return task, nil
 }
@@ -183,6 +189,8 @@ func (s *InMemoryService) Retry(_ context.Context, input RetryInput) (Task, erro
 	task.NodeID = ""
 	task.NextRetryAt = &retryAt
 	task.ErrorMessage = input.LastError
+	task.BlockerType = ""
+	task.BlockerMessage = ""
 	s.items[input.TaskID] = task
 	return task, nil
 }
@@ -202,6 +210,8 @@ func (s *InMemoryService) Complete(_ context.Context, input CompleteInput) (Task
 	task.FinalURL = input.FinalURL
 	task.ScreenshotBase64 = input.ScreenshotBase64
 	task.ScreenshotArtifactURL = input.ScreenshotArtifactURL
+	task.BlockerType = ""
+	task.BlockerMessage = ""
 	task.ErrorMessage = ""
 	task.NextRetryAt = nil
 	task.CompletedAt = &now
@@ -224,6 +234,8 @@ func (s *InMemoryService) Fail(_ context.Context, input FailInput) (Task, error)
 	task.FinalURL = input.FinalURL
 	task.ScreenshotBase64 = input.Screenshot
 	task.ScreenshotArtifactURL = input.ScreenshotArtifactURL
+	task.BlockerType = input.BlockerType
+	task.BlockerMessage = input.BlockerMessage
 	task.ErrorMessage = input.Error
 	task.NextRetryAt = nil
 	task.CompletedAt = &now

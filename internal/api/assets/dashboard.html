@@ -1168,6 +1168,7 @@
           '<div class="pair"><span class="k">Node ID</span><span class="v mono">' + escapeHTML(task.node_id || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Attempts</span><span class="v mono">' + escapeHTML(String(task.attempt || 0)) + '/' + escapeHTML(String(task.max_retries || 0)) + '</span></div>' +
           '<div class="pair"><span class="k">Timeline</span><span class="v mono">created: ' + escapeHTML(fmtTime(task.created_at)) + '<br>started: ' + escapeHTML(fmtTime(task.started_at)) + '<br>completed: ' + escapeHTML(fmtTime(task.completed_at)) + '</span></div>' +
+          '<div class="pair"><span class="k">Blocker</span><span class="v">' + escapeHTML((task.blocker_type || '-') + (task.blocker_message ? (': ' + task.blocker_message) : '')) + '</span></div>' +
           '<div class="pair"><span class="k">Error</span><span class="v">' + escapeHTML(task.error_message || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Artifact URL</span><span class="v">' + openArtifactLink + '</span></div>' +
           '<div class="pair"><span class="k">Actions JSON</span><pre class="json">' + escapeHTML(actionsJSON) + '</pre></div>' +

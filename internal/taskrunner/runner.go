@@ -182,6 +182,8 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 			FinalURL:              result.FinalURL,
 			ScreenshotBase64:      screenshotBase64,
 			ScreenshotArtifactURL: screenshotArtifactURL,
+			BlockerType:           result.BlockerType,
+			BlockerMessage:        blockerMessage,
 		})
 		return
 	}
@@ -443,6 +445,8 @@ type failureEvidence struct {
 	FinalURL              string
 	ScreenshotBase64      string
 	ScreenshotArtifactURL string
+	BlockerType           string
+	BlockerMessage        string
 }
 
 func (r *Runner) failTaskWithEvidence(ctx context.Context, taskID, nodeID string, err error, evidence failureEvidence) {
@@ -456,6 +460,8 @@ func (r *Runner) failTaskWithEvidence(ctx context.Context, taskID, nodeID string
 		FinalURL:              evidence.FinalURL,
 		Screenshot:            evidence.ScreenshotBase64,
 		ScreenshotArtifactURL: evidence.ScreenshotArtifactURL,
+		BlockerType:           evidence.BlockerType,
+		BlockerMessage:        evidence.BlockerMessage,
 	})
 }
 

@@ -259,6 +259,12 @@ func TestRunnerFailsFastOnBlockerResponse(t *testing.T) {
 	if failed.ScreenshotBase64 == "" {
 		t.Fatalf("expected screenshot evidence")
 	}
+	if failed.BlockerType != "human_verification_required" {
+		t.Fatalf("expected blocker type persisted, got %q", failed.BlockerType)
+	}
+	if failed.BlockerMessage == "" {
+		t.Fatalf("expected blocker message persisted")
+	}
 }
 
 func TestRunnerReconcilesQueuedTasksOnStart(t *testing.T) {

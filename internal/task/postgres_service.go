@@ -66,11 +66,11 @@ func (s *PostgresService) Create(ctx context.Context, input CreateInput) (Task, 
 INSERT INTO tasks (
 	id, session_id, url, goal, actions, status, attempt, max_retries,
 	next_retry_at, node_id, page_title, final_url, screenshot_base64,
-	screenshot_artifact_url, error_message, created_at, started_at, completed_at
+	screenshot_artifact_url, blocker_type, blocker_message, error_message, created_at, started_at, completed_at
 ) VALUES (
 	$1, $2, $3, $4, $5::jsonb, $6, 0, $7,
 	NULL, NULL, NULL, NULL, NULL,
-	NULL, NULL, $8, NULL, NULL
+	NULL, NULL, NULL, NULL, $8, NULL, NULL
 )
 RETURNING `+taskColumns, taskID, input.SessionID, input.URL, input.Goal, actionsJSON, StatusQueued, input.MaxRetries, now)
 
@@ -89,6 +89,8 @@ SET
 	started_at = $4,
 	next_retry_at = NULL,
 	error_message = '',
+	blocker_type = NULL,
+	blocker_message = NULL,
 	completed_at = NULL
 WHERE id = $1 AND status = $5
 RETURNING `+taskColumns,
@@ -120,7 +122,9 @@ SET
 	status = $2,
 	node_id = NULL,
 	next_retry_at = $3,
-	error_message = $4
+	error_message = $4,
+	blocker_type = NULL,
+	blocker_message = NULL
 WHERE id = $1
 RETURNING `+taskColumns,
 		input.TaskID,
@@ -151,6 +155,8 @@ SET
 	screenshot_base64 = $6,
 	screenshot_artifact_url = $7,
 	error_message = '',
+	blocker_type = NULL,
+	blocker_message = NULL,
 	next_retry_at = NULL,
 	completed_at = $8
 WHERE id = $1
@@ -186,9 +192,11 @@ SET
 	final_url = $5,
 	screenshot_base64 = $6,
 	screenshot_artifact_url = $7,
-	error_message = $8,
+	blocker_type = $8,
+	blocker_message = $9,
+	error_message = $10,
 	next_retry_at = NULL,
-	completed_at = $9
+	completed_at = $11
 WHERE id = $1
 RETURNING `+taskColumns,
 		input.TaskID,
@@ -198,6 +206,8 @@ RETURNING `+taskColumns,
 		nullableString(input.FinalURL),
 		nullableString(input.Screenshot),
 		nullableString(input.ScreenshotArtifactURL),
+		nullableString(input.BlockerType),
+		nullableString(input.BlockerMessage),
 		input.Error,
 		now,
 	)
@@ -304,6 +314,8 @@ CREATE TABLE IF NOT EXISTS tasks (
 	final_url TEXT NULL,
 	screenshot_base64 TEXT NULL,
 	screenshot_artifact_url TEXT NULL,
+	blocker_type TEXT NULL,
+	blocker_message TEXT NULL,
 	error_message TEXT NULL,
 	created_at TIMESTAMPTZ NOT NULL,
 	started_at TIMESTAMPTZ NULL,
@@ -312,6 +324,9 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status_retry
 ON tasks (status, next_retry_at);
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocker_type TEXT NULL;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocker_message TEXT NULL;
 `)
 	if err != nil {
 		return fmt.Errorf("initialize tasks schema: %w", err)
@@ -350,6 +365,8 @@ page_title,
 final_url,
 screenshot_base64,
 screenshot_artifact_url,
+blocker_type,
+blocker_message,
 error_message,
 created_at,
 started_at,
@@ -364,6 +381,8 @@ func scanTask(row rowScanner) (Task, error) {
 	var finalURL *string
 	var screenshotBase64 *string
 	var screenshotArtifactURL *string
+	var blockerType *string
+	var blockerMessage *string
 	var errorMessage *string
 	var startedAt *time.Time
 	var completedAt *time.Time
@@ -383,6 +402,8 @@ func scanTask(row rowScanner) (Task, error) {
 		&finalURL,
 		&screenshotBase64,
 		&screenshotArtifactURL,
+		&blockerType,
+		&blockerMessage,
 		&errorMessage,
 		&item.CreatedAt,
 		&startedAt,
@@ -407,6 +428,8 @@ func scanTask(row rowScanner) (Task, error) {
 	item.FinalURL = deref(finalURL)
 	item.ScreenshotBase64 = deref(screenshotBase64)
 	item.ScreenshotArtifactURL = deref(screenshotArtifactURL)
+	item.BlockerType = deref(blockerType)
+	item.BlockerMessage = deref(blockerMessage)
 	item.ErrorMessage = deref(errorMessage)
 
 	return item, nil
