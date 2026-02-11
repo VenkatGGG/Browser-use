@@ -264,6 +264,41 @@ LIMIT $1
 	return items, nil
 }
 
+func (s *PostgresService) ListBySourceTaskID(ctx context.Context, sourceTaskID string, limit int) ([]Task, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	sourceTaskID = strings.TrimSpace(sourceTaskID)
+	if sourceTaskID == "" {
+		return []Task{}, nil
+	}
+
+	rows, err := s.pool.Query(ctx, `
+SELECT `+taskColumns+`
+FROM tasks
+WHERE source_task_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2
+`, sourceTaskID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]Task, 0, limit)
+	for rows.Next() {
+		item, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (s *PostgresService) ListQueued(ctx context.Context, limit int) ([]Task, error) {
 	if limit <= 0 {
 		limit = 100

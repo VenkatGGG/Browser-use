@@ -544,7 +544,7 @@ func TestListDirectReplays(t *testing.T) {
 	var payload struct {
 		SourceTaskID string      `json:"source_task_id"`
 		Tasks        []task.Task `json:"tasks"`
-		Scanned      int         `json:"scanned"`
+		Count        int         `json:"count"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode direct replays response: %v", err)
@@ -560,7 +560,7 @@ func TestListDirectReplays(t *testing.T) {
 			t.Fatalf("expected child source_task_id %s, got %s", root.ID, item.SourceTaskID)
 		}
 	}
-	if payload.Scanned == 0 {
-		t.Fatalf("expected scanned count > 0")
+	if payload.Count != 2 {
+		t.Fatalf("expected count 2, got %d", payload.Count)
 	}
 }

@@ -292,22 +292,16 @@ func (s *Server) listDirectReplays(w http.ResponseWriter, r *http.Request, id st
 		limit = parsed
 	}
 
-	recent, err := s.tasks.ListRecent(r.Context(), limit)
+	children, err := s.tasks.ListBySourceTaskID(r.Context(), id, limit)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "list_failed", err.Error())
 		return
-	}
-	children := make([]task.Task, 0, len(recent))
-	for _, item := range recent {
-		if item.SourceTaskID == id {
-			children = append(children, item)
-		}
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"source_task_id": id,
 		"tasks":          children,
-		"scanned":        len(recent),
+		"count":          len(children),
 	})
 }
 
