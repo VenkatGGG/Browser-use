@@ -23,6 +23,17 @@ Local-first orchestration infrastructure for AI browser automation.
 - One-command local startup via `make up`.
 - `.env` template in `deploy/compose/.env.example`.
 
+### Phase 2 in progress (agent connectivity baseline)
+- `browser-node` container now runs:
+  - `google-chrome-stable` on `amd64` (falls back to `chromium` on `arm64`)
+  - `Xvfb` virtual display
+  - `node-agent` sidecar
+- Node phone-home API flow implemented:
+  - `POST /v1/nodes/register`
+  - `POST /v1/nodes/{id}/heartbeat`
+  - `GET /v1/nodes`
+- `node-agent` auto-registers with orchestrator and sends periodic heartbeats.
+
 ## Quick start
 
 1. Initialize env and boot the stack:
@@ -35,7 +46,12 @@ make up
 curl http://localhost:8080/healthz
 ```
 
-3. Run tests:
+3. Validate node registration:
+```bash
+curl http://localhost:8080/v1/nodes
+```
+
+4. Run tests:
 ```bash
 make test
 ```
