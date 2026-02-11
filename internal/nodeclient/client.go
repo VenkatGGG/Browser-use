@@ -30,6 +30,8 @@ type ExecuteOutput struct {
 	PageTitle        string `json:"page_title"`
 	FinalURL         string `json:"final_url"`
 	ScreenshotBase64 string `json:"screenshot_base64"`
+	BlockerType      string `json:"blocker_type,omitempty"`
+	BlockerMessage   string `json:"blocker_message,omitempty"`
 }
 
 type Client interface {

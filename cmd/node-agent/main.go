@@ -66,6 +66,8 @@ type executeResponse struct {
 	PageTitle        string `json:"page_title"`
 	FinalURL         string `json:"final_url"`
 	ScreenshotBase64 string `json:"screenshot_base64"`
+	BlockerType      string `json:"blocker_type,omitempty"`
+	BlockerMessage   string `json:"blocker_message,omitempty"`
 }
 
 type browserExecutor struct {
@@ -137,6 +139,10 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 		}
 	}
 
+	if blocked, response := e.detectBlocker(runCtx, client); blocked {
+		return response, nil
+	}
+
 	executionActions := append([]executeAction(nil), actions...)
 	if len(executionActions) == 0 && strings.TrimSpace(goal) != "" && e.planner != nil {
 		snapshot, err := capturePageSnapshot(runCtx, client)
@@ -159,6 +165,10 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 		}
 	}
 
+	if blocked, response := e.detectBlocker(runCtx, client); blocked {
+		return response, nil
+	}
+
 	title, err := client.EvaluateString(runCtx, "document.title")
 	if err != nil {
 		return executeResponse{}, err
@@ -177,6 +187,45 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 		FinalURL:         finalURL,
 		ScreenshotBase64: screenshot,
 	}, nil
+}
+
+func (e *browserExecutor) detectBlocker(ctx context.Context, client *cdp.Client) (bool, executeResponse) {
+	title, err := client.EvaluateString(ctx, "document.title")
+	if err != nil {
+		return false, executeResponse{}
+	}
+	finalURL, err := client.EvaluateString(ctx, "window.location.href")
+	if err != nil {
+		return false, executeResponse{}
+	}
+	bodyText, err := client.EvaluateString(ctx, `(() => {
+		const raw = document && document.body ? String(document.body.innerText || document.body.textContent || "") : "";
+		return raw.replace(/\s+/g, " ").slice(0, 5000);
+	})()`)
+	if err != nil {
+		return false, executeResponse{}
+	}
+
+	blockerType, blockerMessage := classifyBlocker(finalURL, title, bodyText)
+	if blockerType == "" {
+		return false, executeResponse{}
+	}
+
+	screenshot := ""
+	if shot, err := client.CaptureScreenshot(ctx); err == nil {
+		screenshot = shot
+	}
+	if blockerMessage == "" {
+		blockerMessage = "blocking challenge detected"
+	}
+
+	return true, executeResponse{
+		PageTitle:        title,
+		FinalURL:         finalURL,
+		ScreenshotBase64: screenshot,
+		BlockerType:      blockerType,
+		BlockerMessage:   blockerMessage,
+	}
 }
 
 func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, action executeAction) error {

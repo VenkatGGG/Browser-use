@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -42,6 +43,21 @@ func (f *flakyExecutor) CallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.calls
+}
+
+type blockerExecutor struct {
+	calls int
+}
+
+func (b *blockerExecutor) Execute(_ context.Context, _ string, input nodeclient.ExecuteInput) (nodeclient.ExecuteOutput, error) {
+	b.calls++
+	return nodeclient.ExecuteOutput{
+		PageTitle:        "Challenge",
+		FinalURL:         input.URL + "?captcha=true",
+		ScreenshotBase64: "ZmFrZV9zY3JlZW5zaG90",
+		BlockerType:      "human_verification_required",
+		BlockerMessage:   "human verification challenge detected",
+	}, nil
 }
 
 func TestRunnerRetriesTransientFailures(t *testing.T) {
@@ -185,6 +201,63 @@ func TestRunnerDoesNotRetryURLAssertionTimeout(t *testing.T) {
 	}
 	if exec.CallCount() != 1 {
 		t.Fatalf("expected 1 executor call, got %d", exec.CallCount())
+	}
+}
+
+func TestRunnerFailsFastOnBlockerResponse(t *testing.T) {
+	taskSvc := task.NewInMemoryService()
+	nodes := pool.NewInMemoryRegistry()
+	_, err := nodes.Register(context.Background(), pool.RegisterInput{NodeID: "node-1", Address: "node-1:8091", Version: "dev"})
+	if err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+
+	exec := &blockerExecutor{}
+	runner := New(taskSvc, nodes, exec, nil, Config{
+		QueueSize:       8,
+		Workers:         1,
+		NodeWaitTimeout: 1 * time.Second,
+		PollInterval:    30 * time.Millisecond,
+		RetryBaseDelay:  20 * time.Millisecond,
+		RetryMaxDelay:   100 * time.Millisecond,
+	}, log.New(io.Discard, "", 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Start(ctx)
+
+	created, err := taskSvc.Create(ctx, task.CreateInput{
+		SessionID:  "sess_1",
+		URL:        "https://example.com",
+		Goal:       "search",
+		MaxRetries: 2,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := runner.Enqueue(ctx, created.ID); err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+
+	failed := waitForTerminalTask(t, ctx, taskSvc, created.ID, 4*time.Second)
+	if failed.Status != task.StatusFailed {
+		t.Fatalf("expected failed status, got %s", failed.Status)
+	}
+	if failed.Attempt != 1 {
+		t.Fatalf("expected 1 attempt, got %d", failed.Attempt)
+	}
+	if !strings.Contains(failed.ErrorMessage, "human_verification_required") {
+		t.Fatalf("expected blocker type in error, got %q", failed.ErrorMessage)
+	}
+	if failed.PageTitle != "Challenge" {
+		t.Fatalf("expected page title evidence, got %q", failed.PageTitle)
+	}
+	if failed.FinalURL == "" {
+		t.Fatalf("expected final url evidence")
+	}
+	if failed.ScreenshotBase64 == "" {
+		t.Fatalf("expected screenshot evidence")
 	}
 }
 

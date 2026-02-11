@@ -171,16 +171,19 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		return
 	}
 
-	screenshotBase64 := result.ScreenshotBase64
-	screenshotArtifactURL := ""
-	if r.artifacts != nil && strings.TrimSpace(result.ScreenshotBase64) != "" {
-		url, saveErr := r.artifacts.SaveScreenshotBase64(ctx, startedTask.ID, result.ScreenshotBase64)
-		if saveErr != nil {
-			r.logger.Printf("task %s artifact save failed (falling back to inline screenshot): %v", startedTask.ID, saveErr)
-		} else {
-			screenshotArtifactURL = url
-			screenshotBase64 = ""
+	screenshotBase64, screenshotArtifactURL := r.persistScreenshot(ctx, startedTask.ID, result.ScreenshotBase64)
+	if result.BlockerType != "" {
+		blockerMessage := strings.TrimSpace(result.BlockerMessage)
+		if blockerMessage == "" {
+			blockerMessage = "blocking challenge detected"
 		}
+		r.failTaskWithEvidence(ctx, startedTask.ID, node.ID, fmt.Errorf("blocked (%s): %s", result.BlockerType, blockerMessage), failureEvidence{
+			PageTitle:             result.PageTitle,
+			FinalURL:              result.FinalURL,
+			ScreenshotBase64:      screenshotBase64,
+			ScreenshotArtifactURL: screenshotArtifactURL,
+		})
+		return
 	}
 
 	if _, err := r.tasks.Complete(ctx, task.CompleteInput{
@@ -302,6 +305,7 @@ func isRetriableError(err error) bool {
 	nonRetriableSignals := []string{
 		"captcha",
 		"verify you are human",
+		"human verification required",
 		"confirm this search was made by a human",
 		"please fill out this field",
 		"timeout waiting for url to contain",
@@ -431,13 +435,43 @@ func (r *Runner) releaseNode(ctx context.Context, node pool.Node) {
 }
 
 func (r *Runner) failTask(ctx context.Context, taskID, nodeID string, err error) {
+	r.failTaskWithEvidence(ctx, taskID, nodeID, err, failureEvidence{})
+}
+
+type failureEvidence struct {
+	PageTitle             string
+	FinalURL              string
+	ScreenshotBase64      string
+	ScreenshotArtifactURL string
+}
+
+func (r *Runner) failTaskWithEvidence(ctx context.Context, taskID, nodeID string, err error, evidence failureEvidence) {
 	r.logger.Printf("task %s failed: %v", taskID, err)
 	_, _ = r.tasks.Fail(ctx, task.FailInput{
-		TaskID:    taskID,
-		NodeID:    nodeID,
-		Completed: time.Now().UTC(),
-		Error:     err.Error(),
+		TaskID:                taskID,
+		NodeID:                nodeID,
+		Completed:             time.Now().UTC(),
+		Error:                 err.Error(),
+		PageTitle:             evidence.PageTitle,
+		FinalURL:              evidence.FinalURL,
+		Screenshot:            evidence.ScreenshotBase64,
+		ScreenshotArtifactURL: evidence.ScreenshotArtifactURL,
 	})
+}
+
+func (r *Runner) persistScreenshot(ctx context.Context, taskID, rawBase64 string) (string, string) {
+	screenshotBase64 := strings.TrimSpace(rawBase64)
+	screenshotArtifactURL := ""
+	if r.artifacts != nil && screenshotBase64 != "" {
+		url, saveErr := r.artifacts.SaveScreenshotBase64(ctx, taskID, screenshotBase64)
+		if saveErr != nil {
+			r.logger.Printf("task %s artifact save failed (falling back to inline screenshot): %v", taskID, saveErr)
+		} else {
+			screenshotArtifactURL = url
+			screenshotBase64 = ""
+		}
+	}
+	return screenshotBase64, screenshotArtifactURL
 }
 
 func mapNodeActions(actions []task.Action) []nodeclient.Action {

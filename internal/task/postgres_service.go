@@ -185,9 +185,10 @@ SET
 	page_title = $4,
 	final_url = $5,
 	screenshot_base64 = $6,
-	error_message = $7,
+	screenshot_artifact_url = $7,
+	error_message = $8,
 	next_retry_at = NULL,
-	completed_at = $8
+	completed_at = $9
 WHERE id = $1
 RETURNING `+taskColumns,
 		input.TaskID,
@@ -196,6 +197,7 @@ RETURNING `+taskColumns,
 		nullableString(input.PageTitle),
 		nullableString(input.FinalURL),
 		nullableString(input.Screenshot),
+		nullableString(input.ScreenshotArtifactURL),
 		input.Error,
 		now,
 	)

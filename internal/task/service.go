@@ -84,13 +84,14 @@ type CompleteInput struct {
 }
 
 type FailInput struct {
-	TaskID     string
-	NodeID     string
-	Completed  time.Time
-	Error      string
-	PageTitle  string
-	FinalURL   string
-	Screenshot string
+	TaskID                string
+	NodeID                string
+	Completed             time.Time
+	Error                 string
+	PageTitle             string
+	FinalURL              string
+	Screenshot            string
+	ScreenshotArtifactURL string
 }
 
 type Service interface {
@@ -222,6 +223,7 @@ func (s *InMemoryService) Fail(_ context.Context, input FailInput) (Task, error)
 	task.PageTitle = input.PageTitle
 	task.FinalURL = input.FinalURL
 	task.ScreenshotBase64 = input.Screenshot
+	task.ScreenshotArtifactURL = input.ScreenshotArtifactURL
 	task.ErrorMessage = input.Error
 	task.NextRetryAt = nil
 	task.CompletedAt = &now
