@@ -20,7 +20,7 @@ Local-first orchestration infrastructure for AI browser automation.
   - `orchestrator`
   - `redis`
   - `postgres`
-- One-command local startup via `make up`.
+- One-command local startup via `make up` with docker preflight checks and readiness wait (`/healthz`).
 - `.env` template in `deploy/compose/.env.example`.
 
 ### Phase 2 in progress (agent connectivity baseline)
@@ -159,6 +159,7 @@ make up              # build + start local stack
 make down            # stop stack
 make logs            # stream compose logs
 make ps              # list compose services
+make health          # wait for orchestrator readiness
 make test            # run go tests
 make fmt             # gofmt all go files
 make proto           # generate go protobuf stubs

@@ -1,11 +1,14 @@
-FROM golang:1.22-alpine AS builder
+ARG GO_VERSION=1.25
+FROM golang:${GO_VERSION}-alpine AS builder
 WORKDIR /src
+ARG TARGETOS=linux
+ARG TARGETARCH
 
 COPY go.mod ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/node-agent ./cmd/node-agent
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/node-agent ./cmd/node-agent
 
 FROM debian:bookworm-slim
 
