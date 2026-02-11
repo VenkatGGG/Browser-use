@@ -546,6 +546,19 @@
       text-decoration: underline;
     }
 
+    .link-btn {
+      border: 0;
+      background: transparent;
+      color: #145f86;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 0;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+    }
+
     .empty {
       border: 1px dashed var(--line);
       border-radius: 11px;
@@ -1191,6 +1204,9 @@
       const openArtifactLink = task.screenshot_artifact_url
         ? '<a class="link mono" href="' + escapeHTML(task.screenshot_artifact_url) + '" target="_blank" rel="noopener noreferrer">' + escapeHTML(task.screenshot_artifact_url) + '</a>'
         : '-';
+      const sourceTask = task.source_task_id
+        ? '<button type="button" class="link-btn" data-select-task-id="' + escapeHTML(task.source_task_id) + '">' + escapeHTML(task.source_task_id) + '</button>'
+        : '-';
 
       taskDetailEl.innerHTML = (
         '<div class="detail-header">' +
@@ -1202,7 +1218,7 @@
         '</div>' +
         '<div class="detail-list">' +
           '<div class="pair"><span class="k">Goal</span><span class="v">' + escapeHTML(task.goal || '-') + '</span></div>' +
-          '<div class="pair"><span class="k">Source Task</span><span class="v mono">' + escapeHTML(task.source_task_id || '-') + '</span></div>' +
+          '<div class="pair"><span class="k">Source Task</span><span class="v">' + sourceTask + '</span></div>' +
           '<div class="pair"><span class="k">URL</span><span class="v">' + escapeHTML(task.url || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Final URL</span><span class="v">' + escapeHTML(task.final_url || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Node ID</span><span class="v mono">' + escapeHTML(task.node_id || '-') + '</span></div>' +
@@ -1575,6 +1591,24 @@
           imagePreviewEl.src = url;
           imageTitleEl.textContent = url;
           imageModalEl.classList.add('show');
+          return;
+        }
+
+        const selectTaskTarget = event.target.closest('[data-select-task-id]');
+        if (selectTaskTarget) {
+          const sourceID = selectTaskTarget.getAttribute('data-select-task-id');
+          if (!sourceID) return;
+          const exists = state.tasks.some((task) => task.id === sourceID);
+          if (exists) {
+            state.selectedTaskID = sourceID;
+            renderTaskTable();
+            renderDetail();
+          } else {
+            state.filters.query = sourceID;
+            document.getElementById('filter-query').value = sourceID;
+            renderAll();
+            createStatusEl.textContent = 'Source task ' + sourceID + ' is not in current fetch window; search filter was applied.';
+          }
           return;
         }
 

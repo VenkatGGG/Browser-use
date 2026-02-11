@@ -62,7 +62,7 @@ Local-first orchestration infrastructure for AI browser automation.
   - live polling controls (pause/resume, refresh interval, fetch limit)
   - filtered task feed (status/search/artifact/failure/blocker/sort)
   - blocker-aware task table column + blocker KPIs (count and rate)
-  - selectable task detail panel with metadata, action JSON, and replay
+  - selectable task detail panel with metadata, lineage jump-to-source, action JSON, and replay
   - screenshot artifact preview modal and failure triage list
   - task submission form with reusable presets (session creation + queue task)
   - embedded HTML asset at `internal/api/assets/dashboard.html`
