@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package node.v1;
+
+option go_package = "github.com/VenkatGGG/Browser-use/internal/gen/nodev1;nodev1";
+
+service NodeAgent {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc OpenURL(OpenURLRequest) returns (OpenURLResponse);
+  rpc Act(ActRequest) returns (ActResponse);
+  rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+message RegisterRequest {
+  string node_id = 1;
+  string private_ip = 2;
+  string version = 3;
+  int64 booted_unix = 4;
+}
+
+message RegisterResponse {
+  bool accepted = 1;
+  string lease_token = 2;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  int64 unix_time = 2;
+  string state = 3;
+}
+
+message HeartbeatResponse {
+  bool ok = 1;
+}
+
+message OpenURLRequest {
+  string session_id = 1;
+  string url = 2;
+}
+
+message OpenURLResponse {
+  bool ok = 1;
+  string error_message = 2;
+}
+
+message ActRequest {
+  string session_id = 1;
+  string action = 2;
+  map<string, string> params = 3;
+}
+
+message ActResponse {
+  bool ok = 1;
+  string error_message = 2;
+  string metadata_json = 3;
+}
+
+message SnapshotRequest {
+  string session_id = 1;
+  bool with_marks = 2;
+}
+
+message SnapshotResponse {
+  string content_type = 1;
+  bytes image_bytes = 2;
+}
+
+message ShutdownRequest {
+  string reason = 1;
+}
+
+message ShutdownResponse {
+  bool ok = 1;
+}
