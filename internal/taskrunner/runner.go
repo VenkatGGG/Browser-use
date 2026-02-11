@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ type Config struct {
 	Workers         int
 	NodeWaitTimeout time.Duration
 	PollInterval    time.Duration
+	RetryBaseDelay  time.Duration
+	RetryMaxDelay   time.Duration
 }
 
 type Runner struct {
@@ -49,6 +52,15 @@ func New(tasks task.Service, nodes pool.Registry, executor nodeclient.Client, ar
 	}
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 250 * time.Millisecond
+	}
+	if cfg.RetryBaseDelay <= 0 {
+		cfg.RetryBaseDelay = 1 * time.Second
+	}
+	if cfg.RetryMaxDelay <= 0 {
+		cfg.RetryMaxDelay = 20 * time.Second
+	}
+	if cfg.RetryMaxDelay < cfg.RetryBaseDelay {
+		cfg.RetryMaxDelay = cfg.RetryBaseDelay
 	}
 	if logger == nil {
 		logger = log.Default()
@@ -113,39 +125,40 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		return
 	}
 
+	startedTask, err := r.tasks.Start(ctx, task.StartInput{
+		TaskID:  taskRecord.ID,
+		NodeID:  "",
+		Started: time.Now().UTC(),
+	})
+	if err != nil {
+		r.failTask(ctx, taskRecord.ID, "", fmt.Errorf("failed to start task: %w", err))
+		return
+	}
+
 	node, err := r.acquireNode(ctx)
 	if err != nil {
-		r.failTask(ctx, taskRecord, "", fmt.Errorf("no node available: %w", err))
+		r.handleExecutionFailure(ctx, startedTask, "", fmt.Errorf("no node available: %w", err))
 		return
 	}
 	defer r.releaseNode(ctx, node)
 
-	if _, err := r.tasks.Start(ctx, task.StartInput{
-		TaskID:  taskRecord.ID,
-		NodeID:  node.ID,
-		Started: time.Now().UTC(),
-	}); err != nil {
-		r.failTask(ctx, taskRecord, node.ID, fmt.Errorf("failed to start task: %w", err))
-		return
-	}
-
 	result, err := r.executor.Execute(ctx, node.Address, nodeclient.ExecuteInput{
-		TaskID:  taskRecord.ID,
-		URL:     taskRecord.URL,
-		Goal:    taskRecord.Goal,
-		Actions: mapNodeActions(taskRecord.Actions),
+		TaskID:  startedTask.ID,
+		URL:     startedTask.URL,
+		Goal:    startedTask.Goal,
+		Actions: mapNodeActions(startedTask.Actions),
 	})
 	if err != nil {
-		r.failTask(ctx, taskRecord, node.ID, fmt.Errorf("node execution failed: %w", err))
+		r.handleExecutionFailure(ctx, startedTask, node.ID, fmt.Errorf("node execution failed: %w", err))
 		return
 	}
 
 	screenshotBase64 := result.ScreenshotBase64
 	screenshotArtifactURL := ""
 	if r.artifacts != nil && strings.TrimSpace(result.ScreenshotBase64) != "" {
-		url, saveErr := r.artifacts.SaveScreenshotBase64(ctx, taskRecord.ID, result.ScreenshotBase64)
+		url, saveErr := r.artifacts.SaveScreenshotBase64(ctx, startedTask.ID, result.ScreenshotBase64)
 		if saveErr != nil {
-			r.logger.Printf("task %s artifact save failed (falling back to inline screenshot): %v", taskRecord.ID, saveErr)
+			r.logger.Printf("task %s artifact save failed (falling back to inline screenshot): %v", startedTask.ID, saveErr)
 		} else {
 			screenshotArtifactURL = url
 			screenshotBase64 = ""
@@ -153,7 +166,7 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 	}
 
 	if _, err := r.tasks.Complete(ctx, task.CompleteInput{
-		TaskID:                taskRecord.ID,
+		TaskID:                startedTask.ID,
 		NodeID:                node.ID,
 		Completed:             time.Now().UTC(),
 		PageTitle:             result.PageTitle,
@@ -161,9 +174,121 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		ScreenshotBase64:      screenshotBase64,
 		ScreenshotArtifactURL: screenshotArtifactURL,
 	}); err != nil {
-		r.failTask(ctx, taskRecord, node.ID, fmt.Errorf("failed to complete task: %w", err))
+		r.failTask(ctx, startedTask.ID, node.ID, fmt.Errorf("failed to complete task: %w", err))
 		return
 	}
+}
+
+func (r *Runner) handleExecutionFailure(ctx context.Context, taskRecord task.Task, nodeID string, execErr error) {
+	if r.shouldRetry(taskRecord, execErr) {
+		delay := r.retryDelay(taskRecord.Attempt)
+		retryAt := time.Now().UTC().Add(delay)
+		if _, err := r.tasks.Retry(ctx, task.RetryInput{
+			TaskID:    taskRecord.ID,
+			RetryAt:   retryAt,
+			LastError: execErr.Error(),
+		}); err != nil {
+			r.failTask(ctx, taskRecord.ID, nodeID, fmt.Errorf("retry scheduling failed: %w", err))
+			return
+		}
+		r.logger.Printf(
+			"task %s attempt=%d failed; scheduling retry in %s (%d/%d retries used)",
+			taskRecord.ID,
+			taskRecord.Attempt,
+			delay,
+			taskRecord.Attempt,
+			taskRecord.MaxRetries,
+		)
+		go r.enqueueAfterDelay(ctx, taskRecord.ID, delay)
+		return
+	}
+
+	r.failTask(ctx, taskRecord.ID, nodeID, execErr)
+}
+
+func (r *Runner) shouldRetry(taskRecord task.Task, execErr error) bool {
+	if taskRecord.MaxRetries <= 0 {
+		return false
+	}
+	if taskRecord.Attempt > taskRecord.MaxRetries {
+		return false
+	}
+	return isRetriableError(execErr)
+}
+
+func (r *Runner) retryDelay(attempt int) time.Duration {
+	exponent := math.Max(0, float64(attempt-1))
+	delay := float64(r.cfg.RetryBaseDelay) * math.Pow(2, exponent)
+	if delay > float64(r.cfg.RetryMaxDelay) {
+		delay = float64(r.cfg.RetryMaxDelay)
+	}
+	return time.Duration(delay)
+}
+
+func isRetriableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	msg := strings.ToLower(err.Error())
+	signals := []string{
+		"timeout",
+		"temporarily",
+		"connection refused",
+		"connection reset",
+		"no such host",
+		"dial tcp",
+		"no node available",
+		"bad gateway",
+		"eof",
+		"unexpected status 5",
+	}
+	for _, signal := range signals {
+		if strings.Contains(msg, signal) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runner) enqueueAfterDelay(ctx context.Context, taskID string, delay time.Duration) {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-timer.C:
+	}
+
+	for attempts := 0; attempts < 10; attempts++ {
+		enqueueCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+		err := r.Enqueue(enqueueCtx, taskID)
+		cancel()
+		if err == nil {
+			return
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		if !errors.Is(err, ErrQueueFull) {
+			r.failTask(context.Background(), taskID, "", fmt.Errorf("re-enqueue failed: %w", err))
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+
+	r.failTask(context.Background(), taskID, "", errors.New("re-enqueue failed: queue remained full"))
 }
 
 func (r *Runner) acquireNode(ctx context.Context) (pool.Node, error) {
@@ -226,10 +351,10 @@ func (r *Runner) releaseNode(ctx context.Context, node pool.Node) {
 	})
 }
 
-func (r *Runner) failTask(ctx context.Context, taskRecord task.Task, nodeID string, err error) {
-	r.logger.Printf("task %s failed: %v", taskRecord.ID, err)
+func (r *Runner) failTask(ctx context.Context, taskID, nodeID string, err error) {
+	r.logger.Printf("task %s failed: %v", taskID, err)
 	_, _ = r.tasks.Fail(ctx, task.FailInput{
-		TaskID:    taskRecord.ID,
+		TaskID:    taskID,
 		NodeID:    nodeID,
 		Completed: time.Now().UTC(),
 		Error:     err.Error(),

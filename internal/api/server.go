@@ -15,22 +15,27 @@ type TaskDispatcher interface {
 }
 
 type Server struct {
-	sessions        session.Service
-	tasks           task.Service
-	nodes           pool.Registry
-	dispatcher      TaskDispatcher
-	artifactPath    string
-	artifactHandler http.Handler
+	sessions          session.Service
+	tasks             task.Service
+	nodes             pool.Registry
+	dispatcher        TaskDispatcher
+	defaultMaxRetries int
+	artifactPath      string
+	artifactHandler   http.Handler
 }
 
-func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry, dispatcher TaskDispatcher, artifactPath string, artifactHandler http.Handler) *Server {
+func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry, dispatcher TaskDispatcher, defaultMaxRetries int, artifactPath string, artifactHandler http.Handler) *Server {
+	if defaultMaxRetries < 0 {
+		defaultMaxRetries = 0
+	}
 	return &Server{
-		sessions:        sessions,
-		tasks:           tasks,
-		nodes:           nodes,
-		dispatcher:      dispatcher,
-		artifactPath:    artifactPath,
-		artifactHandler: artifactHandler,
+		sessions:          sessions,
+		tasks:             tasks,
+		nodes:             nodes,
+		dispatcher:        dispatcher,
+		defaultMaxRetries: defaultMaxRetries,
+		artifactPath:      artifactPath,
+		artifactHandler:   artifactHandler,
 	}
 }
 

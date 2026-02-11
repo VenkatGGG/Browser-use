@@ -18,6 +18,7 @@ func TestHealthz(t *testing.T) {
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
 		nil,
+		1,
 		"",
 		nil,
 	)
@@ -37,6 +38,7 @@ func TestNodeRegisterAndList(t *testing.T) {
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
 		nil,
+		1,
 		"",
 		nil,
 	)

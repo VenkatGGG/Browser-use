@@ -21,10 +21,11 @@ type taskActionRequest struct {
 }
 
 type createTaskRequest struct {
-	SessionID string              `json:"session_id"`
-	URL       string              `json:"url"`
-	Goal      string              `json:"goal"`
-	Actions   []taskActionRequest `json:"actions,omitempty"`
+	SessionID  string              `json:"session_id"`
+	URL        string              `json:"url"`
+	Goal       string              `json:"goal"`
+	Actions    []taskActionRequest `json:"actions,omitempty"`
+	MaxRetries *int                `json:"max_retries,omitempty"`
 }
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
@@ -64,11 +65,16 @@ func (s *Server) createAndQueueTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actions := mapTaskActions(req.Actions)
+	maxRetries := s.defaultMaxRetries
+	if req.MaxRetries != nil {
+		maxRetries = *req.MaxRetries
+	}
 	created, err := s.tasks.Create(r.Context(), task.CreateInput{
-		SessionID: strings.TrimSpace(req.SessionID),
-		URL:       strings.TrimSpace(req.URL),
-		Goal:      strings.TrimSpace(req.Goal),
-		Actions:   actions,
+		SessionID:  strings.TrimSpace(req.SessionID),
+		URL:        strings.TrimSpace(req.URL),
+		Goal:       strings.TrimSpace(req.Goal),
+		Actions:    actions,
+		MaxRetries: maxRetries,
 	})
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "create_failed", err.Error())

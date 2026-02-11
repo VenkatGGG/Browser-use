@@ -32,6 +32,7 @@ func TestCreateTaskWithActionsQueued(t *testing.T) {
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
 		dispatcher,
+		2,
 		"",
 		nil,
 	)
@@ -63,6 +64,9 @@ func TestCreateTaskWithActionsQueued(t *testing.T) {
 	if created.Status != task.StatusQueued {
 		t.Fatalf("expected task status queued, got %s", created.Status)
 	}
+	if created.MaxRetries != 2 {
+		t.Fatalf("expected default max_retries 2, got %d", created.MaxRetries)
+	}
 	if len(created.Actions) != 3 {
 		t.Fatalf("expected 3 task actions, got %d", len(created.Actions))
 	}
@@ -79,6 +83,7 @@ func TestCreateTaskQueueFullMarksFailed(t *testing.T) {
 		svc,
 		pool.NewInMemoryRegistry(),
 		dispatcher,
+		1,
 		"",
 		nil,
 	)
@@ -110,5 +115,36 @@ func TestCreateTaskQueueFullMarksFailed(t *testing.T) {
 	}
 	if stored.Status != task.StatusFailed {
 		t.Fatalf("expected stored task status failed, got %s", stored.Status)
+	}
+}
+
+func TestCreateTaskMaxRetriesOverride(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	body := []byte(`{"session_id":"sess_123","url":"https://example.com","goal":"fill form","max_retries":5}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected task status 202, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var created task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode task response: %v", err)
+	}
+	if created.MaxRetries != 5 {
+		t.Fatalf("expected max_retries 5, got %d", created.MaxRetries)
 	}
 }

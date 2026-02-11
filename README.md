@@ -46,6 +46,11 @@ Local-first orchestration infrastructure for AI browser automation.
   - `queued -> running -> completed|failed`
 - `POST /v1/tasks` returns immediately (`202 Accepted`); use `GET /v1/tasks/{id}` for progress/result.
 - Completed tasks store screenshots as artifacts and expose `screenshot_artifact_url`.
+- Runner retries transient failures with exponential backoff (`max_retries` per task).
+  - Defaults are configurable via:
+    - `ORCHESTRATOR_TASK_MAX_RETRIES`
+    - `ORCHESTRATOR_TASK_RETRY_BASE_DELAY`
+    - `ORCHESTRATOR_TASK_RETRY_MAX_DELAY`
 
 ## Quick start
 
@@ -75,7 +80,7 @@ curl -sS -X POST http://localhost:8080/v1/sessions \\
 ```bash
 curl -sS -X POST http://localhost:8080/v1/tasks \\
   -H 'Content-Type: application/json' \\
-  -d '{"session_id":"sess_000001","url":"https://example.com","goal":"open page and capture screenshot"}'
+  -d '{"session_id":"sess_000001","url":"https://example.com","goal":"open page and capture screenshot","max_retries":2}'
 ```
 
 6. Execute a deterministic action flow:
@@ -127,3 +132,4 @@ make run-orchestrator
 - Current session/task services are in-memory stubs for API contract validation.
 - Redis/Postgres are wired for next phases (leasing, persistence, and pool manager state).
 - Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
+- Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.

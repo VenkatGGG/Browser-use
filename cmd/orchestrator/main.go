@@ -22,11 +22,12 @@ import (
 func main() {
 	cfg := config.Load()
 	log.Printf(
-		"config loaded: redis=%s postgres=%s queue_size=%d workers=%d artifacts_dir=%s",
+		"config loaded: redis=%s postgres=%s queue_size=%d workers=%d max_retries=%d artifacts_dir=%s",
 		cfg.RedisAddr,
 		cfg.PostgresDSN,
 		cfg.TaskQueueSize,
 		cfg.TaskWorkers,
+		cfg.TaskDefaultMaxRetries,
 		cfg.ArtifactDir,
 	)
 
@@ -48,6 +49,8 @@ func main() {
 		QueueSize:       cfg.TaskQueueSize,
 		Workers:         cfg.TaskWorkers,
 		NodeWaitTimeout: cfg.NodeWaitTimeout,
+		RetryBaseDelay:  cfg.TaskRetryBaseDelay,
+		RetryMaxDelay:   cfg.TaskRetryMaxDelay,
 	}, log.Default())
 	runner.Start(ctx)
 
@@ -56,6 +59,7 @@ func main() {
 		taskSvc,
 		nodeRegistry,
 		runner,
+		cfg.TaskDefaultMaxRetries,
 		cfg.ArtifactBaseURL,
 		artifactHandler,
 	)
