@@ -42,7 +42,22 @@ Local-first orchestration infrastructure for AI browser automation.
   - CPU/memory/pid limits
   - Chrome debug port is no longer publicly published.
 
-### Phase 3 started (brain execution baseline)
+### Phase 3 started (local provider + warm pool)
+- Warm-pool control loop implemented in `internal/pool/manager.go`:
+  - maintains target ready count
+  - tracks `warming` nodes and times them out
+  - reaps stale nodes on heartbeat timeout
+  - reaps old nodes by max-age
+- Local Docker provider implemented in `internal/pool/local_docker_provider.go`:
+  - provisions isolated browser-node containers
+  - assigns deterministic node IDs and gRPC addresses
+  - destroys managed nodes by ID
+- Orchestrator wiring added (feature-flagged):
+  - `ORCHESTRATOR_POOL_ENABLED=true`
+  - `ORCHESTRATOR_POOL_TARGET_READY=<N>`
+  - provider/manager config from `ORCHESTRATOR_POOL_*` env vars
+
+### Phase 5 started (brain execution baseline)
 - Orchestrator now enqueues task requests and executes them asynchronously in background workers.
 - `node-agent` exposes `POST /v1/execute` and runs CDP actions:
   - open URL
@@ -184,3 +199,4 @@ make run-orchestrator
 - `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.
 - Node-agent now detects blocker pages (captcha/human verification/form validation), returns structured blocker metadata, and runner persists blocker evidence on failed tasks without retry loops.
 - Runner applies per-domain cooldowns after challenge blockers (`human_verification_required` / `bot_blocked`) to fail subsequent tasks fast until cooldown expires.
+- Warm-pool manager is currently feature-flagged and intended for host-run orchestrator mode (`make run-orchestrator`) where `docker` CLI is available; compose mode keeps static node service by default.

@@ -46,6 +46,50 @@ func main() {
 	nodeRegistry := pool.NewInMemoryRegistry()
 	executor := nodeclient.NewGRPCClient(cfg.NodeExecuteTimeout)
 
+	if cfg.PoolEnabled && cfg.PoolTargetReady > 0 {
+		provider, err := pool.NewLocalDockerProvider(pool.LocalDockerProviderConfig{
+			Image:              cfg.PoolDockerImage,
+			Network:            cfg.PoolDockerNetwork,
+			ContainerPrefix:    "browseruse-node",
+			NodeIDPrefix:       cfg.PoolManagedNodePrefix,
+			NodeGRPCPort:       9091,
+			NodeHTTPPort:       8091,
+			OrchestratorURL:    cfg.PoolOrchestratorURL,
+			NodeVersion:        cfg.PoolNodeVersion,
+			HeartbeatInterval:  cfg.PoolNodeHeartbeat,
+			RequestTimeout:     cfg.PoolNodeRequestTimeout,
+			CDPBaseURL:         cfg.PoolNodeCDPBaseURL,
+			RenderDelay:        cfg.PoolNodeRenderDelay,
+			ExecuteTimeout:     cfg.PoolNodeExecuteTimeout,
+			PlannerMode:        cfg.PoolNodePlannerMode,
+			XVFBScreenGeometry: cfg.PoolXVFBScreenGeometry,
+			ChromeDebugPort:    cfg.PoolChromeDebugPort,
+		})
+		if err != nil {
+			log.Fatalf("initialize pool provider: %v", err)
+		}
+
+		poolManager := pool.NewManager(nodeRegistry, provider, pool.ManagerConfig{
+			TargetReady:       cfg.PoolTargetReady,
+			ReconcileInterval: cfg.PoolReconcileInterval,
+			HeartbeatTimeout:  cfg.PoolHeartbeatTimeout,
+			NodeMaxAge:        cfg.PoolNodeMaxAge,
+			ManagedNodePrefix: cfg.PoolManagedNodePrefix,
+			ProvisionLabels: map[string]string{
+				"browseruse.project": "browser-use",
+				"browseruse.role":    "warm-pool-node",
+			},
+		}, log.Default())
+		go poolManager.Run(ctx)
+		log.Printf(
+			"pool manager enabled: target_ready=%d image=%s network=%s orchestrator_url=%s",
+			cfg.PoolTargetReady,
+			cfg.PoolDockerImage,
+			cfg.PoolDockerNetwork,
+			cfg.PoolOrchestratorURL,
+		)
+	}
+
 	artifactStore, err := artifact.NewLocalStore(cfg.ArtifactDir, cfg.ArtifactBaseURL)
 	if err != nil {
 		log.Fatalf("initialize artifact store: %v", err)
