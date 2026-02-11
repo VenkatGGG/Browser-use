@@ -32,6 +32,8 @@ func TestCreateTaskWithActionsQueued(t *testing.T) {
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
 		dispatcher,
+		"",
+		nil,
 	)
 
 	body := []byte(`{
@@ -77,6 +79,8 @@ func TestCreateTaskQueueFullMarksFailed(t *testing.T) {
 		svc,
 		pool.NewInMemoryRegistry(),
 		dispatcher,
+		"",
+		nil,
 	)
 
 	body := []byte(`{"session_id":"sess_123","url":"https://example.com","goal":"fill form"}`)

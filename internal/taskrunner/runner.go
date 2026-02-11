@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VenkatGGG/Browser-use/internal/artifact"
 	"github.com/VenkatGGG/Browser-use/internal/nodeclient"
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/task"
@@ -24,18 +25,19 @@ type Config struct {
 }
 
 type Runner struct {
-	tasks    task.Service
-	nodes    pool.Registry
-	executor nodeclient.Client
-	cfg      Config
-	logger   *log.Logger
+	tasks     task.Service
+	nodes     pool.Registry
+	executor  nodeclient.Client
+	artifacts artifact.Store
+	cfg       Config
+	logger    *log.Logger
 
 	queue  chan string
 	lease  map[string]struct{}
 	leaseM sync.Mutex
 }
 
-func New(tasks task.Service, nodes pool.Registry, executor nodeclient.Client, cfg Config, logger *log.Logger) *Runner {
+func New(tasks task.Service, nodes pool.Registry, executor nodeclient.Client, artifacts artifact.Store, cfg Config, logger *log.Logger) *Runner {
 	if cfg.QueueSize <= 0 {
 		cfg.QueueSize = 256
 	}
@@ -53,13 +55,14 @@ func New(tasks task.Service, nodes pool.Registry, executor nodeclient.Client, cf
 	}
 
 	return &Runner{
-		tasks:    tasks,
-		nodes:    nodes,
-		executor: executor,
-		cfg:      cfg,
-		logger:   logger,
-		queue:    make(chan string, cfg.QueueSize),
-		lease:    make(map[string]struct{}),
+		tasks:     tasks,
+		nodes:     nodes,
+		executor:  executor,
+		artifacts: artifacts,
+		cfg:       cfg,
+		logger:    logger,
+		queue:     make(chan string, cfg.QueueSize),
+		lease:     make(map[string]struct{}),
 	}
 }
 
@@ -137,13 +140,26 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		return
 	}
 
+	screenshotBase64 := result.ScreenshotBase64
+	screenshotArtifactURL := ""
+	if r.artifacts != nil && strings.TrimSpace(result.ScreenshotBase64) != "" {
+		url, saveErr := r.artifacts.SaveScreenshotBase64(ctx, taskRecord.ID, result.ScreenshotBase64)
+		if saveErr != nil {
+			r.logger.Printf("task %s artifact save failed (falling back to inline screenshot): %v", taskRecord.ID, saveErr)
+		} else {
+			screenshotArtifactURL = url
+			screenshotBase64 = ""
+		}
+	}
+
 	if _, err := r.tasks.Complete(ctx, task.CompleteInput{
-		TaskID:           taskRecord.ID,
-		NodeID:           node.ID,
-		Completed:        time.Now().UTC(),
-		PageTitle:        result.PageTitle,
-		FinalURL:         result.FinalURL,
-		ScreenshotBase64: result.ScreenshotBase64,
+		TaskID:                taskRecord.ID,
+		NodeID:                node.ID,
+		Completed:             time.Now().UTC(),
+		PageTitle:             result.PageTitle,
+		FinalURL:              result.FinalURL,
+		ScreenshotBase64:      screenshotBase64,
+		ScreenshotArtifactURL: screenshotArtifactURL,
 	}); err != nil {
 		r.failTask(ctx, taskRecord, node.ID, fmt.Errorf("failed to complete task: %w", err))
 		return

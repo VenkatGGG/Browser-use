@@ -3,7 +3,10 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/VenkatGGG/Browser-use/internal/artifact"
 )
 
 type Config struct {
@@ -15,6 +18,8 @@ type Config struct {
 	TaskQueueSize      int
 	TaskWorkers        int
 	NodeWaitTimeout    time.Duration
+	ArtifactDir        string
+	ArtifactBaseURL    string
 	RedisAddr          string
 	PostgresDSN        string
 }
@@ -29,6 +34,8 @@ func Load() Config {
 		TaskQueueSize:      intOrDefault("ORCHESTRATOR_TASK_QUEUE_SIZE", 256),
 		TaskWorkers:        intOrDefault("ORCHESTRATOR_TASK_WORKERS", 1),
 		NodeWaitTimeout:    durationOrDefault("ORCHESTRATOR_NODE_WAIT_TIMEOUT", 30*time.Second),
+		ArtifactDir:        artifact.RootDirFromEnv(os.Getenv("ORCHESTRATOR_ARTIFACTS_DIR")),
+		ArtifactBaseURL:    normalizeArtifactBaseURL(os.Getenv("ORCHESTRATOR_ARTIFACT_BASE_URL")),
 		RedisAddr:          envOrDefault("REDIS_ADDR", "redis:6379"),
 		PostgresDSN:        envOrDefault("POSTGRES_DSN", "postgres://browseruse:browseruse@postgres:5432/browseruse?sslmode=disable"),
 	}
@@ -63,4 +70,19 @@ func intOrDefault(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func normalizeArtifactBaseURL(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "/artifacts"
+	}
+	if !strings.HasPrefix(trimmed, "/") {
+		trimmed = "/" + trimmed
+	}
+	normalized := strings.TrimSuffix(trimmed, "/")
+	if normalized == "" {
+		return "/artifacts"
+	}
+	return normalized
 }

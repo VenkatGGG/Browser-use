@@ -27,20 +27,21 @@ type Action struct {
 }
 
 type Task struct {
-	ID               string     `json:"id"`
-	SessionID        string     `json:"session_id"`
-	URL              string     `json:"url"`
-	Goal             string     `json:"goal"`
-	Actions          []Action   `json:"actions,omitempty"`
-	Status           Status     `json:"status"`
-	NodeID           string     `json:"node_id,omitempty"`
-	PageTitle        string     `json:"page_title,omitempty"`
-	FinalURL         string     `json:"final_url,omitempty"`
-	ScreenshotBase64 string     `json:"screenshot_base64,omitempty"`
-	ErrorMessage     string     `json:"error_message,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	StartedAt        *time.Time `json:"started_at,omitempty"`
-	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	ID                    string     `json:"id"`
+	SessionID             string     `json:"session_id"`
+	URL                   string     `json:"url"`
+	Goal                  string     `json:"goal"`
+	Actions               []Action   `json:"actions,omitempty"`
+	Status                Status     `json:"status"`
+	NodeID                string     `json:"node_id,omitempty"`
+	PageTitle             string     `json:"page_title,omitempty"`
+	FinalURL              string     `json:"final_url,omitempty"`
+	ScreenshotBase64      string     `json:"screenshot_base64,omitempty"`
+	ScreenshotArtifactURL string     `json:"screenshot_artifact_url,omitempty"`
+	ErrorMessage          string     `json:"error_message,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	StartedAt             *time.Time `json:"started_at,omitempty"`
+	CompletedAt           *time.Time `json:"completed_at,omitempty"`
 }
 
 type CreateInput struct {
@@ -57,12 +58,13 @@ type StartInput struct {
 }
 
 type CompleteInput struct {
-	TaskID           string
-	NodeID           string
-	Completed        time.Time
-	PageTitle        string
-	FinalURL         string
-	ScreenshotBase64 string
+	TaskID                string
+	NodeID                string
+	Completed             time.Time
+	PageTitle             string
+	FinalURL              string
+	ScreenshotBase64      string
+	ScreenshotArtifactURL string
 }
 
 type FailInput struct {
@@ -153,6 +155,7 @@ func (s *InMemoryService) Complete(_ context.Context, input CompleteInput) (Task
 	task.PageTitle = input.PageTitle
 	task.FinalURL = input.FinalURL
 	task.ScreenshotBase64 = input.ScreenshotBase64
+	task.ScreenshotArtifactURL = input.ScreenshotArtifactURL
 	task.ErrorMessage = ""
 	task.CompletedAt = &now
 	s.items[input.TaskID] = task

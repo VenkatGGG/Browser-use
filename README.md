@@ -45,6 +45,7 @@ Local-first orchestration infrastructure for AI browser automation.
 - Task lifecycle is tracked:
   - `queued -> running -> completed|failed`
 - `POST /v1/tasks` returns immediately (`202 Accepted`); use `GET /v1/tasks/{id}` for progress/result.
+- Completed tasks store screenshots as artifacts and expose `screenshot_artifact_url`.
 
 ## Quick start
 
@@ -99,7 +100,12 @@ curl -sS -X POST http://localhost:8080/v1/tasks \\
 curl -sS http://localhost:8080/v1/tasks/task_000001
 ```
 
-8. Run tests:
+8. Fetch stored screenshot artifact:
+```bash
+curl -sS http://localhost:8080/artifacts/screenshots/<artifact-file>.png --output screenshot.png
+```
+
+9. Run tests:
 ```bash
 make test
 ```
@@ -120,4 +126,4 @@ make run-orchestrator
 ## Notes
 - Current session/task services are in-memory stubs for API contract validation.
 - Redis/Postgres are wired for next phases (leasing, persistence, and pool manager state).
-- Task responses currently include `screenshot_base64` inline for MVP simplicity.
+- Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.

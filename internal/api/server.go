@@ -15,14 +15,23 @@ type TaskDispatcher interface {
 }
 
 type Server struct {
-	sessions   session.Service
-	tasks      task.Service
-	nodes      pool.Registry
-	dispatcher TaskDispatcher
+	sessions        session.Service
+	tasks           task.Service
+	nodes           pool.Registry
+	dispatcher      TaskDispatcher
+	artifactPath    string
+	artifactHandler http.Handler
 }
 
-func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry, dispatcher TaskDispatcher) *Server {
-	return &Server{sessions: sessions, tasks: tasks, nodes: nodes, dispatcher: dispatcher}
+func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry, dispatcher TaskDispatcher, artifactPath string, artifactHandler http.Handler) *Server {
+	return &Server{
+		sessions:        sessions,
+		tasks:           tasks,
+		nodes:           nodes,
+		dispatcher:      dispatcher,
+		artifactPath:    artifactPath,
+		artifactHandler: artifactHandler,
+	}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -36,6 +45,16 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/register", s.handleNodeRegister)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeByID)
+	if s.artifactHandler != nil {
+		path := s.artifactPath
+		if path == "" {
+			path = "/artifacts"
+		}
+		if path[len(path)-1] != '/' {
+			path += "/"
+		}
+		mux.Handle(path, s.artifactHandler)
+	}
 
 	return mux
 }

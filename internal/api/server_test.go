@@ -18,6 +18,8 @@ func TestHealthz(t *testing.T) {
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
 		nil,
+		"",
+		nil,
 	)
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rr := httptest.NewRecorder()
@@ -34,6 +36,8 @@ func TestNodeRegisterAndList(t *testing.T) {
 		session.NewInMemoryService(),
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
+		nil,
+		"",
 		nil,
 	)
 

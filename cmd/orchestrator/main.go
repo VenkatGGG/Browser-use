@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/VenkatGGG/Browser-use/internal/api"
+	"github.com/VenkatGGG/Browser-use/internal/artifact"
 	"github.com/VenkatGGG/Browser-use/internal/config"
 	"github.com/VenkatGGG/Browser-use/internal/nodeclient"
 	"github.com/VenkatGGG/Browser-use/internal/pool"
@@ -20,7 +21,14 @@ import (
 
 func main() {
 	cfg := config.Load()
-	log.Printf("config loaded: redis=%s postgres=%s queue_size=%d workers=%d", cfg.RedisAddr, cfg.PostgresDSN, cfg.TaskQueueSize, cfg.TaskWorkers)
+	log.Printf(
+		"config loaded: redis=%s postgres=%s queue_size=%d workers=%d artifacts_dir=%s",
+		cfg.RedisAddr,
+		cfg.PostgresDSN,
+		cfg.TaskQueueSize,
+		cfg.TaskWorkers,
+		cfg.ArtifactDir,
+	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -30,14 +38,27 @@ func main() {
 	nodeRegistry := pool.NewInMemoryRegistry()
 	executor := nodeclient.NewHTTPClient(cfg.NodeExecuteTimeout)
 
-	runner := taskrunner.New(taskSvc, nodeRegistry, executor, taskrunner.Config{
+	artifactStore, err := artifact.NewLocalStore(cfg.ArtifactDir, cfg.ArtifactBaseURL)
+	if err != nil {
+		log.Fatalf("initialize artifact store: %v", err)
+	}
+	artifactHandler := http.StripPrefix(cfg.ArtifactBaseURL+"/", http.FileServer(http.Dir(cfg.ArtifactDir)))
+
+	runner := taskrunner.New(taskSvc, nodeRegistry, executor, artifactStore, taskrunner.Config{
 		QueueSize:       cfg.TaskQueueSize,
 		Workers:         cfg.TaskWorkers,
 		NodeWaitTimeout: cfg.NodeWaitTimeout,
 	}, log.Default())
 	runner.Start(ctx)
 
-	server := api.NewServer(sessionSvc, taskSvc, nodeRegistry, runner)
+	server := api.NewServer(
+		sessionSvc,
+		taskSvc,
+		nodeRegistry,
+		runner,
+		cfg.ArtifactBaseURL,
+		artifactHandler,
+	)
 
 	httpServer := &http.Server{
 		Addr:         cfg.HTTPAddr,
