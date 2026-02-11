@@ -8,12 +8,12 @@ Local-first orchestration infrastructure for AI browser automation.
 - Go project structure scaffolded: `cmd`, `internal`, `pkg`, `proto`, `deploy`, `docker`.
 - Orchestrator HTTP API skeleton:
   - `GET /healthz`
-  - `POST /v1/sessions`
-  - `DELETE /v1/sessions/{id}`
-  - `POST /v1/tasks`
-  - `GET /v1/tasks/{id}`
+  - `POST /v1/sessions` (alias: `POST /sessions`)
+  - `DELETE /v1/sessions/{id}` (alias: `DELETE /sessions/{id}`)
+  - `POST /v1/tasks` (alias: `POST /task`)
+  - `GET /v1/tasks/{id}` (alias: `GET /tasks/{id}`)
 - Node-agent bootstrap binary with health endpoint.
-- Node gRPC contract defined in `/proto/node.proto`.
+- Node gRPC contract defined in `/proto/node.proto` with generated Go stubs in `/internal/gen`.
 
 ### Phase 1 complete (local infra baseline)
 - Docker Compose stack with:
