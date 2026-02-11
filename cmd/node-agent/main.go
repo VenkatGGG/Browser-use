@@ -251,6 +251,12 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 			return err
 		}
 		return client.PressEnterOnSelector(actionCtx, selector)
+	case "wait_for_url_contains":
+		fragment := strings.TrimSpace(action.Text)
+		if fragment == "" {
+			return errors.New("text is required for wait_for_url_contains")
+		}
+		return client.WaitForURLContains(actionCtx, fragment, timeout)
 	default:
 		return fmt.Errorf("unsupported action type %q", actionType)
 	}

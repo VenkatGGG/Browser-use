@@ -184,6 +184,45 @@ func (c *Client) WaitForSelector(ctx context.Context, selector string, timeout t
 	}
 }
 
+func (c *Client) WaitForURLContains(ctx context.Context, fragment string, timeout time.Duration) error {
+	fragment = strings.TrimSpace(fragment)
+	if fragment == "" {
+		return errors.New("url fragment is required")
+	}
+	if timeout <= 0 {
+		timeout = defaultSelectorTimeout
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	expression := fmt.Sprintf(`(() => {
+	const needle = %q.toLowerCase();
+	const href = String(window.location.href || "");
+	let decoded = href;
+	try {
+		decoded = decodeURIComponent(href);
+	} catch (_error) {}
+	return href.toLowerCase().includes(needle) || decoded.toLowerCase().includes(needle);
+	})()`, strings.ToLower(fragment))
+
+	for {
+		value, err := c.EvaluateAny(waitCtx, expression)
+		if err != nil {
+			return err
+		}
+		if matched, ok := value.(bool); ok && matched {
+			return nil
+		}
+
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("timeout waiting for URL to contain %q", fragment)
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
 func (c *Client) ClickSelector(ctx context.Context, selector string) error {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {

@@ -26,7 +26,7 @@ func TestParseSearchQuery(t *testing.T) {
 	}
 }
 
-func TestHeuristicPlannerUsesRelativeSubmitButton(t *testing.T) {
+func TestHeuristicPlannerBuildsSearchFlow(t *testing.T) {
 	t.Parallel()
 
 	planner := &heuristicPlanner{}
@@ -42,11 +42,17 @@ func TestHeuristicPlannerUsesRelativeSubmitButton(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan returned error: %v", err)
 	}
-	if len(actions) != 4 {
-		t.Fatalf("expected 4 actions, got %d", len(actions))
+	if len(actions) != 5 {
+		t.Fatalf("expected 5 actions, got %d", len(actions))
 	}
 	if actions[2].Type != "press_enter" {
 		t.Fatalf("expected action 3 type press_enter, got %s", actions[2].Type)
+	}
+	if actions[3].Type != "wait_for_url_contains" {
+		t.Fatalf("expected action 4 type wait_for_url_contains, got %s", actions[3].Type)
+	}
+	if actions[3].Text != "browser automation" {
+		t.Fatalf("expected action 4 text browser automation, got %q", actions[3].Text)
 	}
 	if actions[0].Selector != `input[name="q"][type="search"]` {
 		t.Fatalf("unexpected selected input selector: %s", actions[0].Selector)

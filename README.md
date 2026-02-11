@@ -151,5 +151,5 @@ make run-orchestrator
 - Queued tasks are reconciled from Postgres on runner startup/restart.
 - Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
-- Supported deterministic action types include `wait_for`, `click`, `type`, `wait`, and `press_enter`.
+- Supported deterministic action types include `wait_for`, `click`, `type`, `wait`, `press_enter`, and `wait_for_url_contains`.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.

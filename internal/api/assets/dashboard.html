@@ -1355,9 +1355,9 @@
         actionsInput.value = JSON.stringify([
           { type: 'wait_for', selector: 'input[name="q"]', timeout_ms: 10000 },
           { type: 'type', selector: 'input[name="q"]', text: 'browser use' },
-          { type: 'wait_for', selector: 'button[type="submit"]', timeout_ms: 8000 },
-          { type: 'click', selector: 'button[type="submit"]' },
-          { type: 'wait_for', selector: '#links', timeout_ms: 12000 }
+          { type: 'press_enter', selector: 'input[name="q"]' },
+          { type: 'wait_for_url_contains', text: 'browser use', timeout_ms: 12000 },
+          { type: 'wait', delay_ms: 800 }
         ], null, 2);
         return;
       }
@@ -1368,8 +1368,9 @@
         actionsInput.value = JSON.stringify([
           { type: 'wait_for', selector: 'input[name="search"]', timeout_ms: 10000 },
           { type: 'type', selector: 'input[name="search"]', text: 'browser automation' },
-          { type: 'wait_for', selector: 'button[type="submit"]', timeout_ms: 8000 },
-          { type: 'click', selector: 'button[type="submit"]' }
+          { type: 'press_enter', selector: 'input[name="search"]' },
+          { type: 'wait_for_url_contains', text: 'browser automation', timeout_ms: 12000 },
+          { type: 'wait', delay_ms: 800 }
         ], null, 2);
         return;
       }

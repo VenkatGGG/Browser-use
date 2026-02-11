@@ -49,7 +49,8 @@ func (p *heuristicPlanner) Plan(_ context.Context, goal string, snapshot pageSna
 		{Type: "wait_for", Selector: inputSelector, TimeoutMS: 8000},
 		{Type: "type", Selector: inputSelector, Text: query},
 		{Type: "press_enter", Selector: inputSelector},
-		{Type: "wait", DelayMS: 1200},
+		{Type: "wait_for_url_contains", Text: query, TimeoutMS: 10000},
+		{Type: "wait", DelayMS: 800},
 	}
 	return actions, nil
 }
