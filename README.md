@@ -45,7 +45,7 @@ Local-first orchestration infrastructure for AI browser automation.
 - Task lifecycle is tracked:
   - `queued -> running -> completed|failed`
 - `POST /v1/tasks` returns immediately (`202 Accepted`); use `GET /v1/tasks/{id}` for progress/result.
-- `POST /v1/tasks/{id}/replay` clones an existing task and re-queues it (supports optional `session_id` and `max_retries` overrides, and tracks lineage via `source_task_id`).
+- `POST /v1/tasks/{id}/replay` clones an existing task and re-queues it (supports optional `session_id` or `create_new_session` + `tenant_id`, `max_retries` overrides, and tracks lineage via `source_task_id`).
 - Completed tasks store screenshots as artifacts and expose `screenshot_artifact_url`.
 - Runner retries transient failures with exponential backoff (`max_retries` per task).
   - Defaults are configurable via:
@@ -120,24 +120,31 @@ curl -sS -X POST http://localhost:8080/v1/tasks \\
 curl -sS http://localhost:8080/v1/tasks/<task-id>
 ```
 
-8. Replay an existing task:
+8. Replay an existing task (override session/retries):
 ```bash
 curl -sS -X POST http://localhost:8080/v1/tasks/<task-id>/replay \
   -H 'Content-Type: application/json' \
   -d '{"session_id":"sess_000001","max_retries":2}'
 ```
 
-9. Fetch stored screenshot artifact:
+9. Replay an existing task in a fresh session:
+```bash
+curl -sS -X POST http://localhost:8080/v1/tasks/<task-id>/replay \
+  -H 'Content-Type: application/json' \
+  -d '{"create_new_session":true,"tenant_id":"local-dev","max_retries":2}'
+```
+
+10. Fetch stored screenshot artifact:
 ```bash
 curl -sS http://localhost:8080/artifacts/screenshots/<artifact-file>.png --output screenshot.png
 ```
 
-10. Run tests:
+11. Run tests:
 ```bash
 make test
 ```
 
-11. Open the dashboard:
+12. Open the dashboard:
 ```bash
 open http://localhost:8080/dashboard
 ```

@@ -338,3 +338,85 @@ func TestReplayTaskWithOverrides(t *testing.T) {
 		t.Fatalf("expected overridden max_retries 4, got %d", replayed.MaxRetries)
 	}
 }
+
+func TestReplayTaskWithFreshSession(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	svc := task.NewInMemoryService()
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	original, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID:  "sess_original",
+		URL:        "https://example.com",
+		Goal:       "open page",
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("create original task: %v", err)
+	}
+
+	body := []byte(`{"create_new_session":true,"tenant_id":"replay-tenant","max_retries":3}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+original.ID+"/replay", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var replayed task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &replayed); err != nil {
+		t.Fatalf("decode replay response: %v", err)
+	}
+	if replayed.SourceTaskID != original.ID {
+		t.Fatalf("expected source_task_id %s, got %s", original.ID, replayed.SourceTaskID)
+	}
+	if replayed.SessionID == original.SessionID {
+		t.Fatalf("expected replayed task to use new session id")
+	}
+	if replayed.MaxRetries != 3 {
+		t.Fatalf("expected max_retries 3, got %d", replayed.MaxRetries)
+	}
+}
+
+func TestReplayTaskRejectsConflictingSessionInputs(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	svc := task.NewInMemoryService()
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	original, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID:  "sess_original",
+		URL:        "https://example.com",
+		Goal:       "open page",
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("create original task: %v", err)
+	}
+
+	body := []byte(`{"session_id":"sess_override","create_new_session":true}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+original.ID+"/replay", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}

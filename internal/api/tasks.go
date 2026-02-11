@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/VenkatGGG/Browser-use/internal/session"
 	"github.com/VenkatGGG/Browser-use/internal/task"
 	"github.com/VenkatGGG/Browser-use/internal/taskrunner"
 	"github.com/VenkatGGG/Browser-use/pkg/httpx"
@@ -31,8 +32,10 @@ type createTaskRequest struct {
 }
 
 type replayTaskRequest struct {
-	SessionID  string `json:"session_id,omitempty"`
-	MaxRetries *int   `json:"max_retries,omitempty"`
+	SessionID        string `json:"session_id,omitempty"`
+	MaxRetries       *int   `json:"max_retries,omitempty"`
+	CreateNewSession bool   `json:"create_new_session,omitempty"`
+	TenantID         string `json:"tenant_id,omitempty"`
 }
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +137,29 @@ func (s *Server) replayTask(w http.ResponseWriter, r *http.Request, sourceTaskID
 		}
 	}
 
-	sessionID := strings.TrimSpace(req.SessionID)
+	overrideSessionID := strings.TrimSpace(req.SessionID)
+	if req.CreateNewSession && overrideSessionID != "" {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid_replay_request", "session_id cannot be used with create_new_session")
+		return
+	}
+
+	sessionID := overrideSessionID
+	if req.CreateNewSession {
+		if s.sessions == nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "replay_failed", "session service is not configured")
+			return
+		}
+		tenantID := strings.TrimSpace(req.TenantID)
+		if tenantID == "" {
+			tenantID = "replay"
+		}
+		createdSession, err := s.sessions.Create(r.Context(), session.CreateInput{TenantID: tenantID})
+		if err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "replay_failed", "failed to create replay session: "+err.Error())
+			return
+		}
+		sessionID = createdSession.ID
+	}
 	if sessionID == "" {
 		sessionID = strings.TrimSpace(original.SessionID)
 	}

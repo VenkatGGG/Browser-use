@@ -1231,6 +1231,7 @@
         '</div>' +
         '<div class="detail-actions">' +
           '<button type="button" class="btn btn-primary" id="replay-btn">Replay Task</button>' +
+          '<button type="button" class="btn btn-secondary" id="replay-fresh-btn">Replay New Session</button>' +
           artifactButton +
           '<button type="button" class="btn btn-danger" id="clear-selection-btn">Clear Selection</button>' +
         '</div>'
@@ -1238,7 +1239,12 @@
 
       const replayBtn = document.getElementById('replay-btn');
       if (replayBtn) {
-        replayBtn.addEventListener('click', () => replayTask(task));
+        replayBtn.addEventListener('click', () => replayTask(task, { freshSession: false }));
+      }
+
+      const replayFreshBtn = document.getElementById('replay-fresh-btn');
+      if (replayFreshBtn) {
+        replayFreshBtn.addEventListener('click', () => replayTask(task, { freshSession: true }));
       }
 
       const clearBtn = document.getElementById('clear-selection-btn');
@@ -1377,11 +1383,18 @@
       return task;
     }
 
-    async function replayTask(task) {
+    async function replayTask(task, options) {
+      const freshSession = Boolean(options && options.freshSession);
       const payload = {};
       const sessionOverride = document.getElementById('session-id').value.trim();
+      const tenantID = document.getElementById('tenant-id').value.trim();
       const retriesInput = Number.parseInt(document.getElementById('task-retries').value, 10);
-      if (sessionOverride) {
+      if (freshSession) {
+        payload.create_new_session = true;
+        if (tenantID) {
+          payload.tenant_id = tenantID;
+        }
+      } else if (sessionOverride) {
         payload.session_id = sessionOverride;
       }
       if (Number.isFinite(retriesInput)) {
@@ -1389,7 +1402,9 @@
       }
 
       try {
-        createStatusEl.textContent = 'Replaying task ' + (task.id || '-') + '...';
+        createStatusEl.textContent = freshSession
+          ? 'Replaying task ' + (task.id || '-') + ' in a fresh session...'
+          : 'Replaying task ' + (task.id || '-') + '...';
         const created = await requestJSON('/v1/tasks/' + encodeURIComponent(task.id || '') + '/replay', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
