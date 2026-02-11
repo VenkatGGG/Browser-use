@@ -268,6 +268,9 @@ func TestReplayTaskQueued(t *testing.T) {
 	if replayed.ID == original.ID {
 		t.Fatalf("expected new task id, got same %s", replayed.ID)
 	}
+	if replayed.SourceTaskID != original.ID {
+		t.Fatalf("expected source_task_id %s, got %s", original.ID, replayed.SourceTaskID)
+	}
 	if replayed.SessionID != original.SessionID {
 		t.Fatalf("expected session_id %s, got %s", original.SessionID, replayed.SessionID)
 	}
@@ -324,6 +327,9 @@ func TestReplayTaskWithOverrides(t *testing.T) {
 	var replayed task.Task
 	if err := json.Unmarshal(rr.Body.Bytes(), &replayed); err != nil {
 		t.Fatalf("decode replay response: %v", err)
+	}
+	if replayed.SourceTaskID != original.ID {
+		t.Fatalf("expected source_task_id %s, got %s", original.ID, replayed.SourceTaskID)
 	}
 	if replayed.SessionID != "sess_override" {
 		t.Fatalf("expected overridden session id, got %s", replayed.SessionID)

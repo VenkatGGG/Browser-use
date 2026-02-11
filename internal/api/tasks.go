@@ -144,11 +144,12 @@ func (s *Server) replayTask(w http.ResponseWriter, r *http.Request, sourceTaskID
 	}
 
 	created, err := s.tasks.Create(r.Context(), task.CreateInput{
-		SessionID:  sessionID,
-		URL:        strings.TrimSpace(original.URL),
-		Goal:       strings.TrimSpace(original.Goal),
-		Actions:    append([]task.Action(nil), original.Actions...),
-		MaxRetries: maxRetries,
+		SourceTaskID: sourceTaskID,
+		SessionID:    sessionID,
+		URL:          strings.TrimSpace(original.URL),
+		Goal:         strings.TrimSpace(original.Goal),
+		Actions:      append([]task.Action(nil), original.Actions...),
+		MaxRetries:   maxRetries,
 	})
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "replay_failed", err.Error())

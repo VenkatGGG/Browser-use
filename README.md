@@ -45,7 +45,7 @@ Local-first orchestration infrastructure for AI browser automation.
 - Task lifecycle is tracked:
   - `queued -> running -> completed|failed`
 - `POST /v1/tasks` returns immediately (`202 Accepted`); use `GET /v1/tasks/{id}` for progress/result.
-- `POST /v1/tasks/{id}/replay` clones an existing task and re-queues it (supports optional `session_id` and `max_retries` overrides).
+- `POST /v1/tasks/{id}/replay` clones an existing task and re-queues it (supports optional `session_id` and `max_retries` overrides, and tracks lineage via `source_task_id`).
 - Completed tasks store screenshots as artifacts and expose `screenshot_artifact_url`.
 - Runner retries transient failures with exponential backoff (`max_retries` per task).
   - Defaults are configurable via:

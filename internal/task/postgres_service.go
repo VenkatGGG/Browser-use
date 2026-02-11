@@ -64,15 +64,15 @@ func (s *PostgresService) Create(ctx context.Context, input CreateInput) (Task, 
 
 	row := s.pool.QueryRow(ctx, `
 INSERT INTO tasks (
-	id, session_id, url, goal, actions, status, attempt, max_retries,
+	id, source_task_id, session_id, url, goal, actions, status, attempt, max_retries,
 	next_retry_at, node_id, page_title, final_url, screenshot_base64,
 	screenshot_artifact_url, blocker_type, blocker_message, error_message, created_at, started_at, completed_at
 ) VALUES (
-	$1, $2, $3, $4, $5::jsonb, $6, 0, $7,
+	$1, $2, $3, $4, $5, $6::jsonb, $7, 0, $8,
 	NULL, NULL, NULL, NULL, NULL,
-	NULL, NULL, NULL, NULL, $8, NULL, NULL
+	NULL, NULL, NULL, NULL, $9, NULL, NULL
 )
-RETURNING `+taskColumns, taskID, input.SessionID, input.URL, input.Goal, actionsJSON, StatusQueued, input.MaxRetries, now)
+RETURNING `+taskColumns, taskID, nullableString(input.SourceTaskID), input.SessionID, input.URL, input.Goal, actionsJSON, StatusQueued, input.MaxRetries, now)
 
 	return scanTask(row)
 }
@@ -301,6 +301,7 @@ func (s *PostgresService) initSchema(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `
 CREATE TABLE IF NOT EXISTS tasks (
 	id TEXT PRIMARY KEY,
+	source_task_id TEXT NULL,
 	session_id TEXT NOT NULL,
 	url TEXT NOT NULL,
 	goal TEXT NOT NULL,
@@ -327,6 +328,7 @@ ON tasks (status, next_retry_at);
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocker_type TEXT NULL;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocker_message TEXT NULL;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source_task_id TEXT NULL;
 `)
 	if err != nil {
 		return fmt.Errorf("initialize tasks schema: %w", err)
@@ -352,6 +354,7 @@ type rowScanner interface {
 
 const taskColumns = `
 id,
+source_task_id,
 session_id,
 url,
 goal,
@@ -375,6 +378,7 @@ completed_at`
 func scanTask(row rowScanner) (Task, error) {
 	var item Task
 	var actionsJSON []byte
+	var sourceTaskID *string
 	var nextRetryAt *time.Time
 	var nodeID *string
 	var pageTitle *string
@@ -389,6 +393,7 @@ func scanTask(row rowScanner) (Task, error) {
 
 	err := row.Scan(
 		&item.ID,
+		&sourceTaskID,
 		&item.SessionID,
 		&item.URL,
 		&item.Goal,
@@ -420,6 +425,7 @@ func scanTask(row rowScanner) (Task, error) {
 	}
 
 	item.CreatedAt = item.CreatedAt.UTC()
+	item.SourceTaskID = deref(sourceTaskID)
 	item.NextRetryAt = utcPtr(nextRetryAt)
 	item.StartedAt = utcPtr(startedAt)
 	item.CompletedAt = utcPtr(completedAt)

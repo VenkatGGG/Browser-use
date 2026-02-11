@@ -34,6 +34,7 @@ type Action struct {
 
 type Task struct {
 	ID                    string     `json:"id"`
+	SourceTaskID          string     `json:"source_task_id,omitempty"`
 	SessionID             string     `json:"session_id"`
 	URL                   string     `json:"url"`
 	Goal                  string     `json:"goal"`
@@ -56,11 +57,12 @@ type Task struct {
 }
 
 type CreateInput struct {
-	SessionID  string
-	URL        string
-	Goal       string
-	Actions    []Action
-	MaxRetries int
+	SourceTaskID string
+	SessionID    string
+	URL          string
+	Goal         string
+	Actions      []Action
+	MaxRetries   int
 }
 
 type StartInput struct {
@@ -135,14 +137,15 @@ func (s *InMemoryService) Create(_ context.Context, input CreateInput) (Task, er
 	id := fmt.Sprintf("task_%06d", s.counter.Add(1))
 	now := time.Now().UTC()
 	created := Task{
-		ID:         id,
-		SessionID:  input.SessionID,
-		URL:        input.URL,
-		Goal:       input.Goal,
-		Actions:    append([]Action(nil), input.Actions...),
-		Status:     StatusQueued,
-		MaxRetries: input.MaxRetries,
-		CreatedAt:  now,
+		ID:           id,
+		SourceTaskID: input.SourceTaskID,
+		SessionID:    input.SessionID,
+		URL:          input.URL,
+		Goal:         input.Goal,
+		Actions:      append([]Action(nil), input.Actions...),
+		Status:       StatusQueued,
+		MaxRetries:   input.MaxRetries,
+		CreatedAt:    now,
 	}
 
 	s.mu.Lock()
