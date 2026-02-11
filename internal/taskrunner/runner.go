@@ -299,6 +299,23 @@ func isRetriableError(err error) bool {
 	}
 
 	msg := strings.ToLower(err.Error())
+	nonRetriableSignals := []string{
+		"captcha",
+		"verify you are human",
+		"confirm this search was made by a human",
+		"please fill out this field",
+		"timeout waiting for url to contain",
+		"unsupported action type",
+		"selector is required",
+		"url is required",
+		"invalid selector syntax",
+	}
+	for _, signal := range nonRetriableSignals {
+		if strings.Contains(msg, signal) {
+			return false
+		}
+	}
+
 	signals := []string{
 		"timeout",
 		"temporarily",

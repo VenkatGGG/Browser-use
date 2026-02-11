@@ -140,6 +140,54 @@ func TestRunnerDoesNotRetryNonRetriableErrors(t *testing.T) {
 	}
 }
 
+func TestRunnerDoesNotRetryURLAssertionTimeout(t *testing.T) {
+	taskSvc := task.NewInMemoryService()
+	nodes := pool.NewInMemoryRegistry()
+	_, err := nodes.Register(context.Background(), pool.RegisterInput{NodeID: "node-1", Address: "node-1:8091", Version: "dev"})
+	if err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+
+	exec := &flakyExecutor{failures: 10, failureText: `timeout waiting for URL to contain "browser use"`}
+	runner := New(taskSvc, nodes, exec, nil, Config{
+		QueueSize:       8,
+		Workers:         1,
+		NodeWaitTimeout: 1 * time.Second,
+		PollInterval:    30 * time.Millisecond,
+		RetryBaseDelay:  20 * time.Millisecond,
+		RetryMaxDelay:   100 * time.Millisecond,
+	}, log.New(io.Discard, "", 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Start(ctx)
+
+	created, err := taskSvc.Create(ctx, task.CreateInput{
+		SessionID:  "sess_1",
+		URL:        "https://example.com",
+		Goal:       "open",
+		MaxRetries: 3,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := runner.Enqueue(ctx, created.ID); err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+
+	failed := waitForTerminalTask(t, ctx, taskSvc, created.ID, 4*time.Second)
+	if failed.Status != task.StatusFailed {
+		t.Fatalf("expected failed status, got %s", failed.Status)
+	}
+	if failed.Attempt != 1 {
+		t.Fatalf("expected 1 attempt, got %d", failed.Attempt)
+	}
+	if exec.CallCount() != 1 {
+		t.Fatalf("expected 1 executor call, got %d", exec.CallCount())
+	}
+}
+
 func TestRunnerReconcilesQueuedTasksOnStart(t *testing.T) {
 	taskSvc := task.NewInMemoryService()
 	nodes := pool.NewInMemoryRegistry()
