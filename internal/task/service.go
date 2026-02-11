@@ -100,6 +100,7 @@ type Service interface {
 	Complete(ctx context.Context, input CompleteInput) (Task, error)
 	Fail(ctx context.Context, input FailInput) (Task, error)
 	Get(ctx context.Context, id string) (Task, error)
+	ListRecent(ctx context.Context, limit int) ([]Task, error)
 	ListQueued(ctx context.Context, limit int) ([]Task, error)
 }
 
@@ -236,6 +237,32 @@ func (s *InMemoryService) Get(_ context.Context, id string) (Task, error) {
 		return Task{}, ErrTaskNotFound
 	}
 	return found, nil
+}
+
+func (s *InMemoryService) ListRecent(_ context.Context, limit int) ([]Task, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := make([]Task, 0, len(s.items))
+	for _, item := range s.items {
+		items = append(items, item)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
 }
 
 func (s *InMemoryService) ListQueued(_ context.Context, limit int) ([]Task, error) {

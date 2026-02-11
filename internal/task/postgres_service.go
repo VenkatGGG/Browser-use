@@ -222,6 +222,36 @@ func (s *PostgresService) Get(ctx context.Context, id string) (Task, error) {
 	return Task{}, err
 }
 
+func (s *PostgresService) ListRecent(ctx context.Context, limit int) ([]Task, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	rows, err := s.pool.Query(ctx, `
+SELECT `+taskColumns+`
+FROM tasks
+ORDER BY created_at DESC, id DESC
+LIMIT $1
+`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]Task, 0, limit)
+	for rows.Next() {
+		item, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (s *PostgresService) ListQueued(ctx context.Context, limit int) ([]Task, error) {
 	if limit <= 0 {
 		limit = 100

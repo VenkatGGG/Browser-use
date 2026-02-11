@@ -42,6 +42,8 @@ func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/", s.handleDashboard)
+	mux.HandleFunc("/dashboard", s.handleDashboard)
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/v1/sessions", s.handleSessions)
 	mux.HandleFunc("/v1/sessions/", s.handleSessionByID)

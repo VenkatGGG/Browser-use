@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/session"
@@ -146,5 +147,82 @@ func TestCreateTaskMaxRetriesOverride(t *testing.T) {
 	}
 	if created.MaxRetries != 5 {
 		t.Fatalf("expected max_retries 5, got %d", created.MaxRetries)
+	}
+}
+
+func TestListRecentTasks(t *testing.T) {
+	svc := task.NewInMemoryService()
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		nil,
+		1,
+		"",
+		nil,
+	)
+
+	first, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID: "sess_1",
+		URL:       "https://example.com/1",
+		Goal:      "one",
+	})
+	if err != nil {
+		t.Fatalf("create first task: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+
+	second, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID: "sess_2",
+		URL:       "https://example.com/2",
+		Goal:      "two",
+	})
+	if err != nil {
+		t.Fatalf("create second task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks?limit=2", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Tasks []task.Task `json:"tasks"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode tasks response: %v", err)
+	}
+
+	if len(payload.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(payload.Tasks))
+	}
+	if payload.Tasks[0].ID != second.ID {
+		t.Fatalf("expected first task in list to be %s, got %s", second.ID, payload.Tasks[0].ID)
+	}
+	if payload.Tasks[1].ID != first.ID {
+		t.Fatalf("expected second task in list to be %s, got %s", first.ID, payload.Tasks[1].ID)
+	}
+}
+
+func TestListRecentTasksInvalidLimit(t *testing.T) {
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		nil,
+		1,
+		"",
+		nil,
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks?limit=abc", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }

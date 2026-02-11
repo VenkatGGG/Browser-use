@@ -54,6 +54,13 @@ Local-first orchestration infrastructure for AI browser automation.
 - When `actions` is omitted, node-agent can auto-plan simple search flows from `goal`
   using a lightweight page snapshot heuristic planner (`NODE_AGENT_PLANNER_MODE=heuristic`).
 
+### Phase 4 started (dashboard)
+- Orchestrator now serves a live dashboard at `GET /dashboard`.
+- Dashboard includes:
+  - node fleet cards
+  - recent task table with status pills and screenshot preview
+  - task submission form (session creation + queue task)
+
 ## Quick start
 
 1. Initialize env and boot the stack:
@@ -117,6 +124,11 @@ curl -sS http://localhost:8080/artifacts/screenshots/<artifact-file>.png --outpu
 make test
 ```
 
+10. Open the dashboard:
+```bash
+open http://localhost:8080/dashboard
+```
+
 ## Development commands
 
 ```bash
@@ -136,3 +148,4 @@ make run-orchestrator
 - Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
 - Supported deterministic action types include `wait_for`, `click`, `type`, `wait`, and `press_enter`.
+- `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.

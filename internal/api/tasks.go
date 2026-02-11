@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,8 @@ type createTaskRequest struct {
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
+	case http.MethodGet:
+		s.listRecentTasks(w, r)
 	case http.MethodPost:
 		s.createAndQueueTask(w, r)
 	default:
@@ -106,6 +109,31 @@ func (s *Server) createAndQueueTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.WriteJSON(w, http.StatusAccepted, created)
+}
+
+func (s *Server) listRecentTasks(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			httpx.WriteError(w, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer")
+			return
+		}
+		if parsed > 200 {
+			parsed = 200
+		}
+		limit = parsed
+	}
+
+	items, err := s.tasks.ListRecent(r.Context(), limit)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "list_failed", err.Error())
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"tasks": items,
+	})
 }
 
 func mapTaskActions(actions []taskActionRequest) []task.Action {

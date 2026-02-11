@@ -3,8 +3,10 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/VenkatGGG/Browser-use/internal/pool"
@@ -66,5 +68,31 @@ func TestNodeRegisterAndList(t *testing.T) {
 	srv.Routes().ServeHTTP(listRR, listReq)
 	if listRR.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", listRR.Code)
+	}
+}
+
+func TestDashboardRoute(t *testing.T) {
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		nil,
+		1,
+		"",
+		nil,
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+	body, err := io.ReadAll(rr.Body)
+	if err != nil {
+		t.Fatalf("read dashboard body: %v", err)
+	}
+	if !strings.Contains(string(body), "Browser Use Control Room") {
+		t.Fatalf("dashboard response missing expected title")
 	}
 }
