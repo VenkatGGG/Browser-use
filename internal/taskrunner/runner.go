@@ -35,9 +35,11 @@ type Runner struct {
 	cfg       Config
 	logger    *log.Logger
 
-	queue  chan string
-	lease  map[string]struct{}
-	leaseM sync.Mutex
+	queue    chan string
+	enqueued map[string]struct{}
+	enqueueM sync.Mutex
+	lease    map[string]struct{}
+	leaseM   sync.Mutex
 }
 
 func New(tasks task.Service, nodes pool.Registry, executor nodeclient.Client, artifacts artifact.Store, cfg Config, logger *log.Logger) *Runner {
@@ -74,6 +76,7 @@ func New(tasks task.Service, nodes pool.Registry, executor nodeclient.Client, ar
 		cfg:       cfg,
 		logger:    logger,
 		queue:     make(chan string, cfg.QueueSize),
+		enqueued:  make(map[string]struct{}),
 		lease:     make(map[string]struct{}),
 	}
 }
@@ -83,6 +86,7 @@ func (r *Runner) Start(ctx context.Context) {
 		id := workerID
 		go r.worker(ctx, id)
 	}
+	go r.reconcileQueuedLoop(ctx)
 }
 
 func (r *Runner) Enqueue(ctx context.Context, taskID string) error {
@@ -91,12 +95,22 @@ func (r *Runner) Enqueue(ctx context.Context, taskID string) error {
 		return errors.New("task id is required")
 	}
 
+	r.enqueueM.Lock()
+	if _, ok := r.enqueued[taskID]; ok {
+		r.enqueueM.Unlock()
+		return nil
+	}
+	r.enqueued[taskID] = struct{}{}
+	r.enqueueM.Unlock()
+
 	select {
 	case <-ctx.Done():
+		r.clearEnqueued(taskID)
 		return ctx.Err()
 	case r.queue <- taskID:
 		return nil
 	default:
+		r.clearEnqueued(taskID)
 		return ErrQueueFull
 	}
 }
@@ -109,6 +123,7 @@ func (r *Runner) worker(ctx context.Context, workerID int) {
 			r.logger.Printf("taskrunner worker %d stopping", workerID)
 			return
 		case taskID := <-r.queue:
+			r.clearEnqueued(taskID)
 			r.processTask(ctx, workerID, taskID)
 		}
 	}
@@ -131,6 +146,9 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		Started: time.Now().UTC(),
 	})
 	if err != nil {
+		if errors.Is(err, task.ErrTaskNotQueued) {
+			return
+		}
 		r.failTask(ctx, taskRecord.ID, "", fmt.Errorf("failed to start task: %w", err))
 		return
 	}
@@ -177,6 +195,50 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		r.failTask(ctx, startedTask.ID, node.ID, fmt.Errorf("failed to complete task: %w", err))
 		return
 	}
+}
+
+func (r *Runner) reconcileQueuedLoop(ctx context.Context) {
+	interval := r.cfg.PollInterval
+	if interval < 500*time.Millisecond {
+		interval = 500 * time.Millisecond
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	r.reconcileQueuedOnce(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.reconcileQueuedOnce(ctx)
+		}
+	}
+}
+
+func (r *Runner) reconcileQueuedOnce(ctx context.Context) {
+	items, err := r.tasks.ListQueued(ctx, r.cfg.QueueSize)
+	if err != nil {
+		r.logger.Printf("reconcile queued tasks failed: %v", err)
+		return
+	}
+	for _, item := range items {
+		enqueueCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+		err := r.Enqueue(enqueueCtx, item.ID)
+		cancel()
+		if err != nil && !errors.Is(err, ErrQueueFull) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			r.logger.Printf("reconcile enqueue task %s failed: %v", item.ID, err)
+		}
+		if errors.Is(err, ErrQueueFull) {
+			return
+		}
+	}
+}
+
+func (r *Runner) clearEnqueued(taskID string) {
+	r.enqueueM.Lock()
+	delete(r.enqueued, taskID)
+	r.enqueueM.Unlock()
 }
 
 func (r *Runner) handleExecutionFailure(ctx context.Context, taskRecord task.Task, nodeID string, execErr error) {

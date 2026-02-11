@@ -140,6 +140,50 @@ func TestRunnerDoesNotRetryNonRetriableErrors(t *testing.T) {
 	}
 }
 
+func TestRunnerReconcilesQueuedTasksOnStart(t *testing.T) {
+	taskSvc := task.NewInMemoryService()
+	nodes := pool.NewInMemoryRegistry()
+	_, err := nodes.Register(context.Background(), pool.RegisterInput{NodeID: "node-1", Address: "node-1:8091", Version: "dev"})
+	if err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+
+	created, err := taskSvc.Create(context.Background(), task.CreateInput{
+		SessionID:  "sess_1",
+		URL:        "https://example.com",
+		Goal:       "open",
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	exec := &flakyExecutor{}
+	runner := New(taskSvc, nodes, exec, nil, Config{
+		QueueSize:       8,
+		Workers:         1,
+		NodeWaitTimeout: 1 * time.Second,
+		PollInterval:    30 * time.Millisecond,
+		RetryBaseDelay:  20 * time.Millisecond,
+		RetryMaxDelay:   100 * time.Millisecond,
+	}, log.New(io.Discard, "", 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Start(ctx)
+
+	completed := waitForTerminalTask(t, ctx, taskSvc, created.ID, 4*time.Second)
+	if completed.Status != task.StatusCompleted {
+		t.Fatalf("expected completed status, got %s error=%s", completed.Status, completed.ErrorMessage)
+	}
+	if completed.Attempt != 1 {
+		t.Fatalf("expected 1 attempt, got %d", completed.Attempt)
+	}
+	if exec.CallCount() != 1 {
+		t.Fatalf("expected 1 executor call, got %d", exec.CallCount())
+	}
+}
+
 func waitForTerminalTask(t *testing.T, ctx context.Context, svc task.Service, id string, timeout time.Duration) task.Task {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

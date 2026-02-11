@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,6 +17,11 @@ const (
 	StatusRunning   Status = "running"
 	StatusCompleted Status = "completed"
 	StatusFailed    Status = "failed"
+)
+
+var (
+	ErrTaskNotFound  = errors.New("task not found")
+	ErrTaskNotQueued = errors.New("task is not queued")
 )
 
 type Action struct {
@@ -94,6 +100,7 @@ type Service interface {
 	Complete(ctx context.Context, input CompleteInput) (Task, error)
 	Fail(ctx context.Context, input FailInput) (Task, error)
 	Get(ctx context.Context, id string) (Task, error)
+	ListQueued(ctx context.Context, limit int) ([]Task, error)
 }
 
 type InMemoryService struct {
@@ -145,7 +152,10 @@ func (s *InMemoryService) Start(_ context.Context, input StartInput) (Task, erro
 
 	task, ok := s.items[input.TaskID]
 	if !ok {
-		return Task{}, errors.New("task not found")
+		return Task{}, ErrTaskNotFound
+	}
+	if task.Status != StatusQueued {
+		return Task{}, ErrTaskNotQueued
 	}
 	now := normalizeTime(input.Started)
 	task.Status = StatusRunning
@@ -164,7 +174,7 @@ func (s *InMemoryService) Retry(_ context.Context, input RetryInput) (Task, erro
 
 	task, ok := s.items[input.TaskID]
 	if !ok {
-		return Task{}, errors.New("task not found")
+		return Task{}, ErrTaskNotFound
 	}
 	retryAt := normalizeTime(input.RetryAt)
 	task.Status = StatusQueued
@@ -181,7 +191,7 @@ func (s *InMemoryService) Complete(_ context.Context, input CompleteInput) (Task
 
 	task, ok := s.items[input.TaskID]
 	if !ok {
-		return Task{}, errors.New("task not found")
+		return Task{}, ErrTaskNotFound
 	}
 	now := normalizeTime(input.Completed)
 	task.Status = StatusCompleted
@@ -203,7 +213,7 @@ func (s *InMemoryService) Fail(_ context.Context, input FailInput) (Task, error)
 
 	task, ok := s.items[input.TaskID]
 	if !ok {
-		return Task{}, errors.New("task not found")
+		return Task{}, ErrTaskNotFound
 	}
 	now := normalizeTime(input.Completed)
 	task.Status = StatusFailed
@@ -223,9 +233,51 @@ func (s *InMemoryService) Get(_ context.Context, id string) (Task, error) {
 	defer s.mu.RUnlock()
 	found, ok := s.items[id]
 	if !ok {
-		return Task{}, errors.New("task not found")
+		return Task{}, ErrTaskNotFound
 	}
 	return found, nil
+}
+
+func (s *InMemoryService) ListQueued(_ context.Context, limit int) ([]Task, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	now := time.Now().UTC()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := make([]Task, 0, len(s.items))
+	for _, item := range s.items {
+		if item.Status != StatusQueued {
+			continue
+		}
+		if item.NextRetryAt != nil && item.NextRetryAt.After(now) {
+			continue
+		}
+		items = append(items, item)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		if left.NextRetryAt != nil && right.NextRetryAt != nil {
+			return left.NextRetryAt.Before(*right.NextRetryAt)
+		}
+		if left.NextRetryAt != nil {
+			return true
+		}
+		if right.NextRetryAt != nil {
+			return false
+		}
+		return left.CreatedAt.Before(right.CreatedAt)
+	})
+
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
 }
 
 func normalizeTime(input time.Time) time.Time {

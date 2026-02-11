@@ -35,7 +35,13 @@ func main() {
 	defer stop()
 
 	sessionSvc := session.NewInMemoryService()
-	taskSvc := task.NewInMemoryService()
+	taskServiceInitCtx, taskServiceInitCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	taskSvc, err := task.NewPostgresService(taskServiceInitCtx, cfg.PostgresDSN)
+	taskServiceInitCancel()
+	if err != nil {
+		log.Fatalf("initialize task service: %v", err)
+	}
+	defer taskSvc.Close()
 	nodeRegistry := pool.NewInMemoryRegistry()
 	executor := nodeclient.NewHTTPClient(cfg.NodeExecuteTimeout)
 

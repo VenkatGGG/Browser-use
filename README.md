@@ -102,7 +102,7 @@ curl -sS -X POST http://localhost:8080/v1/tasks \\
 
 7. Poll task status:
 ```bash
-curl -sS http://localhost:8080/v1/tasks/task_000001
+curl -sS http://localhost:8080/v1/tasks/<task-id>
 ```
 
 8. Fetch stored screenshot artifact:
@@ -129,7 +129,7 @@ make run-orchestrator
 ```
 
 ## Notes
-- Current session/task services are in-memory stubs for API contract validation.
-- Redis/Postgres are wired for next phases (leasing, persistence, and pool manager state).
+- Sessions are still in-memory; task state is persisted in Postgres.
+- Queued tasks are reconciled from Postgres on runner startup/restart.
 - Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
