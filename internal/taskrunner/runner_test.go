@@ -60,6 +60,10 @@ func (b *blockerExecutor) Execute(_ context.Context, _ string, input nodeclient.
 	}, nil
 }
 
+func (b *blockerExecutor) CallCount() int {
+	return b.calls
+}
+
 func TestRunnerRetriesTransientFailures(t *testing.T) {
 	taskSvc := task.NewInMemoryService()
 	nodes := pool.NewInMemoryRegistry()
@@ -264,6 +268,75 @@ func TestRunnerFailsFastOnBlockerResponse(t *testing.T) {
 	}
 	if failed.BlockerMessage == "" {
 		t.Fatalf("expected blocker message persisted")
+	}
+}
+
+func TestRunnerAppliesDomainCooldownAfterBlocker(t *testing.T) {
+	taskSvc := task.NewInMemoryService()
+	nodes := pool.NewInMemoryRegistry()
+	_, err := nodes.Register(context.Background(), pool.RegisterInput{NodeID: "node-1", Address: "node-1:8091", Version: "dev"})
+	if err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+
+	exec := &blockerExecutor{}
+	runner := New(taskSvc, nodes, exec, nil, Config{
+		QueueSize:           8,
+		Workers:             1,
+		NodeWaitTimeout:     1 * time.Second,
+		PollInterval:        30 * time.Millisecond,
+		RetryBaseDelay:      20 * time.Millisecond,
+		RetryMaxDelay:       100 * time.Millisecond,
+		DomainBlockCooldown: 2 * time.Second,
+	}, log.New(io.Discard, "", 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Start(ctx)
+
+	first, err := taskSvc.Create(ctx, task.CreateInput{
+		SessionID:  "sess_1",
+		URL:        "https://example.com/search",
+		Goal:       "search one",
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("create first task: %v", err)
+	}
+	if err := runner.Enqueue(ctx, first.ID); err != nil {
+		t.Fatalf("enqueue first task: %v", err)
+	}
+
+	firstResult := waitForTerminalTask(t, ctx, taskSvc, first.ID, 4*time.Second)
+	if firstResult.Status != task.StatusFailed {
+		t.Fatalf("expected first task failed, got %s", firstResult.Status)
+	}
+	if firstResult.BlockerType != "human_verification_required" {
+		t.Fatalf("expected first blocker type human_verification_required, got %q", firstResult.BlockerType)
+	}
+
+	second, err := taskSvc.Create(ctx, task.CreateInput{
+		SessionID:  "sess_2",
+		URL:        "https://example.com/another",
+		Goal:       "search two",
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("create second task: %v", err)
+	}
+	if err := runner.Enqueue(ctx, second.ID); err != nil {
+		t.Fatalf("enqueue second task: %v", err)
+	}
+
+	secondResult := waitForTerminalTask(t, ctx, taskSvc, second.ID, 4*time.Second)
+	if secondResult.Status != task.StatusFailed {
+		t.Fatalf("expected second task failed, got %s", secondResult.Status)
+	}
+	if secondResult.BlockerType != "domain_cooldown" {
+		t.Fatalf("expected second blocker type domain_cooldown, got %q", secondResult.BlockerType)
+	}
+	if exec.CallCount() != 1 {
+		t.Fatalf("expected only 1 executor call due to domain cooldown, got %d", exec.CallCount())
 	}
 }
 

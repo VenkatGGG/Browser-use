@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -19,12 +20,13 @@ import (
 var ErrQueueFull = errors.New("task queue is full")
 
 type Config struct {
-	QueueSize       int
-	Workers         int
-	NodeWaitTimeout time.Duration
-	PollInterval    time.Duration
-	RetryBaseDelay  time.Duration
-	RetryMaxDelay   time.Duration
+	QueueSize           int
+	Workers             int
+	NodeWaitTimeout     time.Duration
+	PollInterval        time.Duration
+	RetryBaseDelay      time.Duration
+	RetryMaxDelay       time.Duration
+	DomainBlockCooldown time.Duration
 }
 
 type Runner struct {
@@ -40,6 +42,9 @@ type Runner struct {
 	enqueueM sync.Mutex
 	lease    map[string]struct{}
 	leaseM   sync.Mutex
+
+	blockedDomains map[string]time.Time
+	blockedM       sync.Mutex
 }
 
 func New(tasks task.Service, nodes pool.Registry, executor nodeclient.Client, artifacts artifact.Store, cfg Config, logger *log.Logger) *Runner {
@@ -67,17 +72,21 @@ func New(tasks task.Service, nodes pool.Registry, executor nodeclient.Client, ar
 	if logger == nil {
 		logger = log.Default()
 	}
+	if cfg.DomainBlockCooldown <= 0 {
+		cfg.DomainBlockCooldown = 3 * time.Minute
+	}
 
 	return &Runner{
-		tasks:     tasks,
-		nodes:     nodes,
-		executor:  executor,
-		artifacts: artifacts,
-		cfg:       cfg,
-		logger:    logger,
-		queue:     make(chan string, cfg.QueueSize),
-		enqueued:  make(map[string]struct{}),
-		lease:     make(map[string]struct{}),
+		tasks:          tasks,
+		nodes:          nodes,
+		executor:       executor,
+		artifacts:      artifacts,
+		cfg:            cfg,
+		logger:         logger,
+		queue:          make(chan string, cfg.QueueSize),
+		enqueued:       make(map[string]struct{}),
+		lease:          make(map[string]struct{}),
+		blockedDomains: make(map[string]time.Time),
 	}
 }
 
@@ -153,6 +162,15 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		return
 	}
 
+	if active, domain, until := r.isDomainBlocked(startedTask.URL, time.Now().UTC()); active {
+		r.failTaskWithEvidence(ctx, startedTask.ID, "", fmt.Errorf("blocked (domain_cooldown): domain %s is in cooldown until %s", domain, until.Format(time.RFC3339)), failureEvidence{
+			FinalURL:       startedTask.URL,
+			BlockerType:    "domain_cooldown",
+			BlockerMessage: "domain blocked after recent challenge; retry after cooldown",
+		})
+		return
+	}
+
 	node, err := r.acquireNode(ctx)
 	if err != nil {
 		r.handleExecutionFailure(ctx, startedTask, "", fmt.Errorf("no node available: %w", err))
@@ -177,6 +195,7 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		if blockerMessage == "" {
 			blockerMessage = "blocking challenge detected"
 		}
+		r.markDomainBlocked(firstNonEmpty(result.FinalURL, startedTask.URL), result.BlockerType, time.Now().UTC())
 		r.failTaskWithEvidence(ctx, startedTask.ID, node.ID, fmt.Errorf("blocked (%s): %s", result.BlockerType, blockerMessage), failureEvidence{
 			PageTitle:             result.PageTitle,
 			FinalURL:              result.FinalURL,
@@ -492,4 +511,66 @@ func mapNodeActions(actions []task.Action) []nodeclient.Action {
 		})
 	}
 	return mapped
+}
+
+func (r *Runner) isDomainBlocked(rawURL string, now time.Time) (bool, string, time.Time) {
+	host := normalizedHost(rawURL)
+	if host == "" {
+		return false, "", time.Time{}
+	}
+	r.blockedM.Lock()
+	defer r.blockedM.Unlock()
+
+	until, ok := r.blockedDomains[host]
+	if !ok {
+		return false, "", time.Time{}
+	}
+	if now.After(until) {
+		delete(r.blockedDomains, host)
+		return false, "", time.Time{}
+	}
+	return true, host, until
+}
+
+func (r *Runner) markDomainBlocked(rawURL, blockerType string, now time.Time) {
+	blocker := strings.TrimSpace(strings.ToLower(blockerType))
+	if blocker != "human_verification_required" && blocker != "bot_blocked" {
+		return
+	}
+	host := normalizedHost(rawURL)
+	if host == "" {
+		return
+	}
+
+	until := now.Add(r.cfg.DomainBlockCooldown)
+	r.blockedM.Lock()
+	existing, ok := r.blockedDomains[host]
+	if !ok || existing.Before(until) {
+		r.blockedDomains[host] = until
+	}
+	r.blockedM.Unlock()
+}
+
+func normalizedHost(rawURL string) string {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return ""
+	}
+	host := strings.TrimSpace(strings.ToLower(parsed.Hostname()))
+	return host
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

@@ -52,6 +52,7 @@ Local-first orchestration infrastructure for AI browser automation.
     - `ORCHESTRATOR_TASK_MAX_RETRIES`
     - `ORCHESTRATOR_TASK_RETRY_BASE_DELAY`
     - `ORCHESTRATOR_TASK_RETRY_MAX_DELAY`
+    - `ORCHESTRATOR_TASK_DOMAIN_BLOCK_COOLDOWN`
 - When `actions` is omitted, node-agent can auto-plan simple search flows from `goal`
   using a lightweight page snapshot heuristic planner (`NODE_AGENT_PLANNER_MODE=heuristic`).
 
@@ -170,3 +171,4 @@ make run-orchestrator
 - Supported deterministic action types include `wait_for`, `click`, `type`, `wait`, `press_enter`, and `wait_for_url_contains`.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
 - Node-agent now detects blocker pages (captcha/human verification/form validation), returns structured blocker metadata, and runner persists blocker evidence on failed tasks without retry loops.
+- Runner applies per-domain cooldowns after challenge blockers (`human_verification_required` / `bot_blocked`) to fail subsequent tasks fast until cooldown expires.

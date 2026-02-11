@@ -22,12 +22,13 @@ import (
 func main() {
 	cfg := config.Load()
 	log.Printf(
-		"config loaded: redis=%s postgres=%s queue_size=%d workers=%d max_retries=%d artifacts_dir=%s",
+		"config loaded: redis=%s postgres=%s queue_size=%d workers=%d max_retries=%d block_cooldown=%s artifacts_dir=%s",
 		cfg.RedisAddr,
 		cfg.PostgresDSN,
 		cfg.TaskQueueSize,
 		cfg.TaskWorkers,
 		cfg.TaskDefaultMaxRetries,
+		cfg.TaskDomainBlockCooldown,
 		cfg.ArtifactDir,
 	)
 
@@ -52,11 +53,12 @@ func main() {
 	artifactHandler := http.StripPrefix(cfg.ArtifactBaseURL+"/", http.FileServer(http.Dir(cfg.ArtifactDir)))
 
 	runner := taskrunner.New(taskSvc, nodeRegistry, executor, artifactStore, taskrunner.Config{
-		QueueSize:       cfg.TaskQueueSize,
-		Workers:         cfg.TaskWorkers,
-		NodeWaitTimeout: cfg.NodeWaitTimeout,
-		RetryBaseDelay:  cfg.TaskRetryBaseDelay,
-		RetryMaxDelay:   cfg.TaskRetryMaxDelay,
+		QueueSize:           cfg.TaskQueueSize,
+		Workers:             cfg.TaskWorkers,
+		NodeWaitTimeout:     cfg.NodeWaitTimeout,
+		RetryBaseDelay:      cfg.TaskRetryBaseDelay,
+		RetryMaxDelay:       cfg.TaskRetryMaxDelay,
+		DomainBlockCooldown: cfg.TaskDomainBlockCooldown,
 	}, log.Default())
 	runner.Start(ctx)
 
