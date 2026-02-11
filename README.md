@@ -57,9 +57,13 @@ Local-first orchestration infrastructure for AI browser automation.
 ### Phase 4 started (dashboard)
 - Orchestrator now serves a live dashboard at `GET /dashboard`.
 - Dashboard includes:
-  - node fleet cards
-  - recent task table with status pills and screenshot preview
-  - task submission form (session creation + queue task)
+  - node fleet cards with heartbeat + version metadata
+  - live polling controls (pause/resume, refresh interval, fetch limit)
+  - filtered task feed (status/search/artifact/failure/sort)
+  - selectable task detail panel with metadata, action JSON, and replay
+  - screenshot artifact preview modal and failure triage list
+  - task submission form with reusable presets (session creation + queue task)
+  - embedded HTML asset at `internal/api/assets/dashboard.html`
 
 ## Quick start
 
