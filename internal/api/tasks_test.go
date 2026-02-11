@@ -78,6 +78,40 @@ func TestCreateTaskWithActionsQueued(t *testing.T) {
 	}
 }
 
+func TestCreateTaskLegacyAliasQueued(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	body := []byte(`{"session_id":"sess_legacy","url":"https://example.com","goal":"open"}`)
+	req := httptest.NewRequest(http.MethodPost, "/task", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var created task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode task response: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatalf("expected task id")
+	}
+	if dispatcher.lastTaskID != created.ID {
+		t.Fatalf("expected dispatched task id %s, got %s", created.ID, dispatcher.lastTaskID)
+	}
+}
+
 func TestCreateTaskQueueFullMarksFailed(t *testing.T) {
 	dispatcher := &recordingDispatcher{err: taskrunner.ErrQueueFull}
 	svc := task.NewInMemoryService()
@@ -226,6 +260,44 @@ func TestListRecentTasksInvalidLimit(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestGetTaskLegacyAliasByID(t *testing.T) {
+	svc := task.NewInMemoryService()
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		nil,
+		1,
+		"",
+		nil,
+	)
+
+	created, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID: "sess_1",
+		URL:       "https://example.com",
+		Goal:      "open",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+created.ID, nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var found task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &found); err != nil {
+		t.Fatalf("decode task response: %v", err)
+	}
+	if found.ID != created.ID {
+		t.Fatalf("expected id %s, got %s", created.ID, found.ID)
 	}
 }
 

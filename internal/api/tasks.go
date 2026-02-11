@@ -49,6 +49,39 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleTaskAlias keeps Phase-0 compatibility for POST /task.
+func (s *Server) handleTaskAlias(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	s.createAndQueueTask(w, r)
+}
+
+// handleTaskAliasByID keeps Phase-0 compatibility for GET /tasks/{id}.
+func (s *Server) handleTaskAliasByID(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/tasks/"))
+	if id == "" {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid_task_id", "task id is required")
+		return
+	}
+	if strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+
+	found, err := s.tasks.Get(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, found)
+}
+
 func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
 	if path == "" {

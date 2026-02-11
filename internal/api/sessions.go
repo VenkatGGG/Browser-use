@@ -33,7 +33,10 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/v1/sessions/")
+	id := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/sessions/"))
+	if id == r.URL.Path {
+		id = strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/sessions/"))
+	}
 	if id == "" {
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_session_id", "session id is required")
 		return

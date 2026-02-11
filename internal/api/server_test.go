@@ -96,3 +96,39 @@ func TestDashboardRoute(t *testing.T) {
 		t.Fatalf("dashboard response missing expected title")
 	}
 }
+
+func TestLegacySessionRoutes(t *testing.T) {
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		nil,
+		1,
+		"",
+		nil,
+	)
+
+	createBody := []byte(`{"tenant_id":"legacy"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/sessions", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("expected create status 201, got %d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	var created session.Session
+	if err := json.Unmarshal(createRR.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created session: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatalf("expected session id")
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/sessions/"+created.ID, nil)
+	deleteRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(deleteRR, deleteReq)
+	if deleteRR.Code != http.StatusNoContent {
+		t.Fatalf("expected delete status 204, got %d body=%s", deleteRR.Code, deleteRR.Body.String())
+	}
+}
