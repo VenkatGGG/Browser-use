@@ -15,7 +15,7 @@ XVFB_PID=$!
   --headless=new \
   --disable-gpu \
   --no-sandbox \
-  --remote-debugging-address=0.0.0.0 \
+  --remote-debugging-address=127.0.0.1 \
   --remote-debugging-port="${CHROME_PORT}" \
   --user-data-dir=/tmp/chrome \
   --window-size=1280,720 \

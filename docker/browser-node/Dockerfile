@@ -20,6 +20,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       gnupg \
+      nodejs \
+      npm \
       wget \
       xvfb \
       fonts-liberation && \
@@ -33,6 +35,7 @@ RUN apt-get update && \
       apt-get install -y --no-install-recommends chromium && \
       ln -sf /usr/bin/chromium /usr/local/bin/browser-bin; \
     fi && \
+    npm install --global playwright-core@1.56.1 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -48,11 +51,12 @@ USER nodeagent
 WORKDIR /home/nodeagent
 
 ENV NODE_AGENT_HTTP_ADDR=:8091
+ENV NODE_AGENT_GRPC_ADDR=:9091
 ENV NODE_AGENT_HEARTBEAT_INTERVAL=5s
 ENV NODE_AGENT_REQUEST_TIMEOUT=5s
 ENV DISPLAY=:99
 ENV CHROME_DEBUG_PORT=9222
 
-EXPOSE 8091 9222
+EXPOSE 8091 9091
 
 ENTRYPOINT ["/usr/local/bin/browser-node-entrypoint"]

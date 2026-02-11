@@ -28,6 +28,16 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: "1.00"
     restart: unless-stopped
 
   browser-node:
@@ -38,6 +48,7 @@ services:
       - .env
     environment:
       NODE_AGENT_HTTP_ADDR: :8091
+      NODE_AGENT_GRPC_ADDR: ${NODE_AGENT_GRPC_ADDR:-:9091}
       NODE_AGENT_ORCHESTRATOR_URL: http://orchestrator:8080
       NODE_AGENT_VERSION: ${NODE_AGENT_VERSION:-dev}
       NODE_AGENT_HEARTBEAT_INTERVAL: ${NODE_AGENT_HEARTBEAT_INTERVAL:-5s}
@@ -46,15 +57,27 @@ services:
       NODE_AGENT_RENDER_DELAY: ${NODE_AGENT_RENDER_DELAY:-2s}
       NODE_AGENT_EXECUTE_TIMEOUT: ${NODE_AGENT_EXECUTE_TIMEOUT:-45s}
       NODE_AGENT_PLANNER_MODE: ${NODE_AGENT_PLANNER_MODE:-heuristic}
-      NODE_AGENT_ADVERTISE_ADDR: browser-node:8091
+      NODE_AGENT_ADVERTISE_ADDR: ${NODE_AGENT_ADVERTISE_ADDR:-browser-node:9091}
       CHROME_DEBUG_PORT: 9222
       XVFB_SCREEN_GEOMETRY: 1280x720x24
     depends_on:
       orchestrator:
         condition: service_started
-    ports:
-      - "8091:8091"
-      - "9222:9222"
+    expose:
+      - "8091"
+      - "9091"
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,noexec,nosuid,nodev
+      - /home/nodeagent:size=256m,noexec,nosuid,nodev
+      - /var/log/browser-node:size=64m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    mem_limit: 2g
+    cpus: "2.00"
     restart: unless-stopped
 
   redis:

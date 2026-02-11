@@ -23,16 +23,24 @@ Local-first orchestration infrastructure for AI browser automation.
 - One-command local startup via `make up` with docker preflight checks and readiness wait (`/healthz`).
 - `.env` template in `deploy/compose/.env.example`.
 
-### Phase 2 in progress (agent connectivity baseline)
-- `browser-node` container now runs:
+### Phase 2 complete (hardened browser sandbox)
+- `browser-node` container now includes:
   - `google-chrome-stable` on `amd64` (falls back to `chromium` on `arm64`)
   - `Xvfb` virtual display
-  - `node-agent` sidecar
+  - `playwright-core` runtime
+  - `node-agent` sidecar (HTTP health + gRPC control plane)
 - Node phone-home API flow implemented:
   - `POST /v1/nodes/register`
   - `POST /v1/nodes/{id}/heartbeat`
   - `GET /v1/nodes`
-- `node-agent` auto-registers with orchestrator and sends periodic heartbeats.
+- Orchestrator now executes node actions through gRPC (`execute_flow`) instead of direct HTTP calls.
+- Runtime hardening applied in compose:
+  - non-root node process
+  - read-only root filesystem
+  - tmpfs for writable runtime paths
+  - dropped Linux capabilities + `no-new-privileges`
+  - CPU/memory/pid limits
+  - Chrome debug port is no longer publicly published.
 
 ### Phase 3 started (brain execution baseline)
 - Orchestrator now enqueues task requests and executes them asynchronously in background workers.
