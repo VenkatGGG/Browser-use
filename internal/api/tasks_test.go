@@ -18,11 +18,13 @@ import (
 
 type recordingDispatcher struct {
 	lastTaskID string
+	taskIDs    []string
 	err        error
 }
 
 func (d *recordingDispatcher) Enqueue(_ context.Context, taskID string) error {
 	d.lastTaskID = taskID
+	d.taskIDs = append(d.taskIDs, taskID)
 	return d.err
 }
 
@@ -224,5 +226,109 @@ func TestListRecentTasksInvalidLimit(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestReplayTaskQueued(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	svc := task.NewInMemoryService()
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	original, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID:  "sess_original",
+		URL:        "https://example.com",
+		Goal:       "open page",
+		Actions:    []task.Action{{Type: "wait", DelayMS: 300}},
+		MaxRetries: 2,
+	})
+	if err != nil {
+		t.Fatalf("create original task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+original.ID+"/replay", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var replayed task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &replayed); err != nil {
+		t.Fatalf("decode replay response: %v", err)
+	}
+	if replayed.ID == original.ID {
+		t.Fatalf("expected new task id, got same %s", replayed.ID)
+	}
+	if replayed.SessionID != original.SessionID {
+		t.Fatalf("expected session_id %s, got %s", original.SessionID, replayed.SessionID)
+	}
+	if replayed.URL != original.URL {
+		t.Fatalf("expected url %s, got %s", original.URL, replayed.URL)
+	}
+	if replayed.Goal != original.Goal {
+		t.Fatalf("expected goal %s, got %s", original.Goal, replayed.Goal)
+	}
+	if replayed.MaxRetries != original.MaxRetries {
+		t.Fatalf("expected max_retries %d, got %d", original.MaxRetries, replayed.MaxRetries)
+	}
+	if len(replayed.Actions) != len(original.Actions) {
+		t.Fatalf("expected %d actions, got %d", len(original.Actions), len(replayed.Actions))
+	}
+	if dispatcher.lastTaskID != replayed.ID {
+		t.Fatalf("expected dispatcher task id %s, got %s", replayed.ID, dispatcher.lastTaskID)
+	}
+}
+
+func TestReplayTaskWithOverrides(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	svc := task.NewInMemoryService()
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	original, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID:  "sess_original",
+		URL:        "https://example.com",
+		Goal:       "open page",
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("create original task: %v", err)
+	}
+
+	body := []byte(`{"session_id":"sess_override","max_retries":4}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+original.ID+"/replay", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var replayed task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &replayed); err != nil {
+		t.Fatalf("decode replay response: %v", err)
+	}
+	if replayed.SessionID != "sess_override" {
+		t.Fatalf("expected overridden session id, got %s", replayed.SessionID)
+	}
+	if replayed.MaxRetries != 4 {
+		t.Fatalf("expected overridden max_retries 4, got %d", replayed.MaxRetries)
 	}
 }

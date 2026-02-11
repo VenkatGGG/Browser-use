@@ -1361,27 +1361,25 @@
     }
 
     async function replayTask(task) {
-      const payload = {
-        session_id: task.session_id || '',
-        url: String(task.url || '').trim(),
-        goal: String(task.goal || '').trim(),
-        max_retries: Number.isFinite(Number(task.max_retries)) ? Number(task.max_retries) : 1
-      };
-
-      const actions = Array.isArray(task.actions) ? task.actions : [];
-      if (actions.length) payload.actions = actions;
-
-      if (!payload.url) {
-        createStatusEl.textContent = 'Replay blocked: selected task has empty url.';
-        return;
+      const payload = {};
+      const sessionOverride = document.getElementById('session-id').value.trim();
+      const retriesInput = Number.parseInt(document.getElementById('task-retries').value, 10);
+      if (sessionOverride) {
+        payload.session_id = sessionOverride;
+      }
+      if (Number.isFinite(retriesInput)) {
+        payload.max_retries = retriesInput;
       }
 
       try {
-        if (!payload.session_id) {
-          payload.session_id = await ensureSessionID();
-        }
         createStatusEl.textContent = 'Replaying task ' + (task.id || '-') + '...';
-        const created = await queueTask(payload);
+        const created = await requestJSON('/v1/tasks/' + encodeURIComponent(task.id || '') + '/replay', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        state.lastCreatedTaskID = created.id || '';
+        state.selectedTaskID = created.id || '';
         createStatusEl.innerHTML = 'Replay queued as <span class="mono">' + escapeHTML(created.id || '-') + '</span>.';
         await refreshDashboard();
       } catch (error) {

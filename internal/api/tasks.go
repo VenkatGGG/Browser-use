@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -29,6 +30,11 @@ type createTaskRequest struct {
 	MaxRetries *int                `json:"max_retries,omitempty"`
 }
 
+type replayTaskRequest struct {
+	SessionID  string `json:"session_id,omitempty"`
+	MaxRetries *int   `json:"max_retries,omitempty"`
+}
+
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -41,23 +47,44 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
-	if id == "" {
+	path := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+	if path == "" {
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_task_id", "task id is required")
 		return
 	}
 
-	switch r.Method {
-	case http.MethodGet:
-		found, err := s.tasks.Get(r.Context(), id)
-		if err != nil {
-			httpx.WriteError(w, http.StatusNotFound, "not_found", err.Error())
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid_task_id", "task id is required")
+		return
+	}
+	id := strings.TrimSpace(parts[0])
+
+	if len(parts) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			found, err := s.tasks.Get(r.Context(), id)
+			if err != nil {
+				httpx.WriteError(w, http.StatusNotFound, "not_found", err.Error())
+				return
+			}
+			httpx.WriteJSON(w, http.StatusOK, found)
+		default:
+			httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		}
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "replay" {
+		if r.Method != http.MethodPost {
+			httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, found)
-	default:
-		httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		s.replayTask(w, r, id)
+		return
 	}
+
+	http.NotFound(w, r)
 }
 
 func (s *Server) createAndQueueTask(w http.ResponseWriter, r *http.Request) {
@@ -84,14 +111,66 @@ func (s *Server) createAndQueueTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	queued, status, ok := s.enqueueCreatedTask(r, created)
+	if !ok {
+		httpx.WriteJSON(w, status, queued)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, queued)
+}
+
+func (s *Server) replayTask(w http.ResponseWriter, r *http.Request, sourceTaskID string) {
+	original, err := s.tasks.Get(r.Context(), sourceTaskID)
+	if err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	var req replayTaskRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			httpx.WriteError(w, http.StatusBadRequest, "invalid_json", "request body must be valid JSON")
+			return
+		}
+	}
+
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(original.SessionID)
+	}
+	maxRetries := original.MaxRetries
+	if req.MaxRetries != nil {
+		maxRetries = *req.MaxRetries
+	}
+
+	created, err := s.tasks.Create(r.Context(), task.CreateInput{
+		SessionID:  sessionID,
+		URL:        strings.TrimSpace(original.URL),
+		Goal:       strings.TrimSpace(original.Goal),
+		Actions:    append([]task.Action(nil), original.Actions...),
+		MaxRetries: maxRetries,
+	})
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "replay_failed", err.Error())
+		return
+	}
+
+	queued, status, ok := s.enqueueCreatedTask(r, created)
+	if !ok {
+		httpx.WriteJSON(w, status, queued)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, queued)
+}
+
+func (s *Server) enqueueCreatedTask(r *http.Request, created task.Task) (task.Task, int, bool) {
 	if s.dispatcher == nil {
 		failed, _ := s.tasks.Fail(r.Context(), task.FailInput{
 			TaskID:    created.ID,
 			Completed: time.Now().UTC(),
 			Error:     "task dispatcher is not configured",
 		})
-		httpx.WriteJSON(w, http.StatusInternalServerError, failed)
-		return
+		return failed, http.StatusInternalServerError, false
 	}
 
 	if err := s.dispatcher.Enqueue(r.Context(), created.ID); err != nil {
@@ -101,14 +180,11 @@ func (s *Server) createAndQueueTask(w http.ResponseWriter, r *http.Request) {
 			Error:     err.Error(),
 		})
 		if errors.Is(err, taskrunner.ErrQueueFull) {
-			httpx.WriteJSON(w, http.StatusServiceUnavailable, failed)
-			return
+			return failed, http.StatusServiceUnavailable, false
 		}
-		httpx.WriteJSON(w, http.StatusInternalServerError, failed)
-		return
+		return failed, http.StatusInternalServerError, false
 	}
-
-	httpx.WriteJSON(w, http.StatusAccepted, created)
+	return created, http.StatusAccepted, true
 }
 
 func (s *Server) listRecentTasks(w http.ResponseWriter, r *http.Request) {
