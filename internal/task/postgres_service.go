@@ -333,7 +333,8 @@ LIMIT $2
 }
 
 func (s *PostgresService) initSchema(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, `
+	statements := []string{
+		`
 CREATE TABLE IF NOT EXISTS tasks (
 	id TEXT PRIMARY KEY,
 	source_task_id TEXT NULL,
@@ -357,19 +358,27 @@ CREATE TABLE IF NOT EXISTS tasks (
 	started_at TIMESTAMPTZ NULL,
 	completed_at TIMESTAMPTZ NULL
 );
-
+`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source_task_id TEXT NULL;`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS max_retries INTEGER NOT NULL DEFAULT 0;`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ NULL;`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS screenshot_artifact_url TEXT NULL;`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocker_type TEXT NULL;`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocker_message TEXT NULL;`,
+		`
 CREATE INDEX IF NOT EXISTS idx_tasks_status_retry
 ON tasks (status, next_retry_at);
-
+`,
+		`
 CREATE INDEX IF NOT EXISTS idx_tasks_source_task_id_created
 ON tasks (source_task_id, created_at DESC);
+`,
+	}
 
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocker_type TEXT NULL;
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocker_message TEXT NULL;
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source_task_id TEXT NULL;
-`)
-	if err != nil {
-		return fmt.Errorf("initialize tasks schema: %w", err)
+	for _, stmt := range statements {
+		if _, err := s.pool.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("initialize tasks schema: %w", err)
+		}
 	}
 	return nil
 }
