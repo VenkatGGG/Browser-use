@@ -18,11 +18,14 @@ import (
 	"time"
 
 	"github.com/VenkatGGG/Browser-use/internal/cdp"
+	nodev1 "github.com/VenkatGGG/Browser-use/internal/gen"
 	"github.com/VenkatGGG/Browser-use/pkg/httpx"
+	"google.golang.org/grpc"
 )
 
 type config struct {
 	HTTPAddr          string
+	GRPCAddr          string
 	NodeID            string
 	Version           string
 	OrchestratorURL   string
@@ -341,6 +344,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	grpcListener, err := net.Listen("tcp", cfg.GRPCAddr)
+	if err != nil {
+		log.Fatalf("node-agent grpc listen failed: %v", err)
+	}
+	grpcServer := grpc.NewServer()
+	nodev1.RegisterNodeAgentServer(grpcServer, newGRPCNodeAgentServer(executor))
+	go func() {
+		log.Printf("node-agent gRPC listening on %s", cfg.GRPCAddr)
+		if err := grpcServer.Serve(grpcListener); err != nil {
+			log.Fatalf("node-agent grpc server failed: %v", err)
+		}
+	}()
+
 	httpServer := &http.Server{
 		Addr:         cfg.HTTPAddr,
 		Handler:      routes(executor),
@@ -360,6 +376,7 @@ func main() {
 		log.Printf("NODE_AGENT_ORCHESTRATOR_URL not set, running health-only mode")
 		<-ctx.Done()
 		shutdownHTTP(httpServer)
+		shutdownGRPC(grpcServer)
 		return
 	}
 
@@ -377,6 +394,7 @@ func main() {
 		select {
 		case <-ctx.Done():
 			shutdownHTTP(httpServer)
+			shutdownGRPC(grpcServer)
 			return
 		case <-heartbeatTicker.C:
 			if err := sendHeartbeat(ctx, client, cfg); err != nil {
@@ -388,6 +406,7 @@ func main() {
 
 func loadConfig() config {
 	httpAddr := envOrDefault("NODE_AGENT_HTTP_ADDR", ":8091")
+	grpcAddr := envOrDefault("NODE_AGENT_GRPC_ADDR", ":9091")
 	nodeID := strings.TrimSpace(os.Getenv("NODE_AGENT_NODE_ID"))
 	if nodeID == "" {
 		hostname, err := os.Hostname()
@@ -400,11 +419,12 @@ func loadConfig() config {
 
 	advertise := strings.TrimSpace(os.Getenv("NODE_AGENT_ADVERTISE_ADDR"))
 	if advertise == "" {
-		advertise = guessAdvertiseAddr(httpAddr)
+		advertise = guessAdvertiseAddr(grpcAddr)
 	}
 
 	return config{
 		HTTPAddr:          httpAddr,
+		GRPCAddr:          grpcAddr,
 		NodeID:            nodeID,
 		Version:           envOrDefault("NODE_AGENT_VERSION", "dev"),
 		OrchestratorURL:   strings.TrimSuffix(strings.TrimSpace(os.Getenv("NODE_AGENT_ORCHESTRATOR_URL")), "/"),
@@ -513,6 +533,20 @@ func shutdownHTTP(server *http.Server) {
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
 		log.Printf("node-agent shutdown error: %v", err)
+	}
+}
+
+func shutdownGRPC(server *grpc.Server) {
+	done := make(chan struct{})
+	go func() {
+		server.GracefulStop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		server.Stop()
 	}
 }
 

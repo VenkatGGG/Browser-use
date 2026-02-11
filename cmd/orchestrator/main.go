@@ -44,7 +44,7 @@ func main() {
 	}
 	defer taskSvc.Close()
 	nodeRegistry := pool.NewInMemoryRegistry()
-	executor := nodeclient.NewHTTPClient(cfg.NodeExecuteTimeout)
+	executor := nodeclient.NewGRPCClient(cfg.NodeExecuteTimeout)
 
 	artifactStore, err := artifact.NewLocalStore(cfg.ArtifactDir, cfg.ArtifactBaseURL)
 	if err != nil {
