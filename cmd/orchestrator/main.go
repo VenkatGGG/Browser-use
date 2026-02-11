@@ -12,6 +12,7 @@ import (
 
 func main() {
 	cfg := config.Load()
+	log.Printf("config loaded: redis=%s postgres=%s", cfg.RedisAddr, cfg.PostgresDSN)
 
 	sessionSvc := session.NewInMemoryService()
 	taskSvc := task.NewInMemoryService()

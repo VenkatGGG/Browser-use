@@ -18,3 +18,4 @@ coverage.out
 .DS_Store
 .vscode/
 .idea/
+deploy/compose/.env
