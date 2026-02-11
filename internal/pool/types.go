@@ -13,10 +13,13 @@ const (
 )
 
 type Node struct {
-	ID          string
-	Address     string
-	State       NodeState
-	LeasedUntil time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            string    `json:"id"`
+	Address       string    `json:"address"`
+	Version       string    `json:"version"`
+	State         NodeState `json:"state"`
+	BootedAt      time.Time `json:"booted_at"`
+	LastHeartbeat time.Time `json:"last_heartbeat"`
+	LeasedUntil   time.Time `json:"leased_until,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
