@@ -47,6 +47,7 @@ Local-first orchestration infrastructure for AI browser automation.
 - `POST /v1/tasks` returns immediately (`202 Accepted`); use `GET /v1/tasks/{id}` for progress/result.
 - `POST /v1/tasks/{id}/replay` clones an existing task and re-queues it (supports optional `session_id` or `create_new_session` + `tenant_id`, `max_retries` overrides, and tracks lineage via `source_task_id`).
 - `GET /v1/tasks/{id}/replay_chain` returns replay lineage (task -> parent -> root).
+- `GET /v1/tasks/{id}/replays` returns direct replay children for a task.
 - Completed tasks store screenshots as artifacts and expose `screenshot_artifact_url`.
 - Runner retries transient failures with exponential backoff (`max_retries` per task).
   - Defaults are configurable via:

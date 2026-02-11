@@ -501,3 +501,66 @@ func TestReplayChainInvalidDepth(t *testing.T) {
 		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestListDirectReplays(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	svc := task.NewInMemoryService()
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	root, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID:  "sess_root",
+		URL:        "https://example.com",
+		Goal:       "root",
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("create root task: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		replayReq := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+root.ID+"/replay", nil)
+		replayRR := httptest.NewRecorder()
+		srv.Routes().ServeHTTP(replayRR, replayReq)
+		if replayRR.Code != http.StatusAccepted {
+			t.Fatalf("replay expected 202, got %d body=%s", replayRR.Code, replayRR.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/"+root.ID+"/replays?limit=50", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		SourceTaskID string      `json:"source_task_id"`
+		Tasks        []task.Task `json:"tasks"`
+		Scanned      int         `json:"scanned"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode direct replays response: %v", err)
+	}
+	if payload.SourceTaskID != root.ID {
+		t.Fatalf("expected source_task_id %s, got %s", root.ID, payload.SourceTaskID)
+	}
+	if len(payload.Tasks) != 2 {
+		t.Fatalf("expected 2 direct replay tasks, got %d", len(payload.Tasks))
+	}
+	for _, item := range payload.Tasks {
+		if item.SourceTaskID != root.ID {
+			t.Fatalf("expected child source_task_id %s, got %s", root.ID, item.SourceTaskID)
+		}
+	}
+	if payload.Scanned == 0 {
+		t.Fatalf("expected scanned count > 0")
+	}
+}

@@ -94,6 +94,14 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		s.getReplayChain(w, r, id)
 		return
 	}
+	if len(parts) == 2 && parts[1] == "replays" {
+		if r.Method != http.MethodGet {
+			httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+		s.listDirectReplays(w, r, id)
+		return
+	}
 
 	http.NotFound(w, r)
 }
@@ -267,6 +275,39 @@ func (s *Server) getReplayChain(w http.ResponseWriter, r *http.Request, id strin
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"tasks":     chain,
 		"truncated": truncated,
+	})
+}
+
+func (s *Server) listDirectReplays(w http.ResponseWriter, r *http.Request, id string) {
+	limit := 200
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			httpx.WriteError(w, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer")
+			return
+		}
+		if parsed > 500 {
+			parsed = 500
+		}
+		limit = parsed
+	}
+
+	recent, err := s.tasks.ListRecent(r.Context(), limit)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "list_failed", err.Error())
+		return
+	}
+	children := make([]task.Task, 0, len(recent))
+	for _, item := range recent {
+		if item.SourceTaskID == id {
+			children = append(children, item)
+		}
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"source_task_id": id,
+		"tasks":          children,
+		"scanned":        len(recent),
 	})
 }
 

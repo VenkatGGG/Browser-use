@@ -942,6 +942,7 @@
       selectedTaskID: "",
       lastCreatedTaskID: "",
       replayChains: {},
+      directReplays: {},
       refreshMs: 3000,
       taskLimit: 120,
       isLive: true,
@@ -1107,6 +1108,58 @@
       }
     }
 
+    function directReplaySummary(replayState) {
+      if (!replayState) return "not loaded";
+      if (replayState.loading) return "loading...";
+      if (replayState.error) return "unavailable: " + replayState.error;
+      const tasks = Array.isArray(replayState.tasks) ? replayState.tasks : [];
+      if (!tasks.length) return "0";
+      return String(tasks.length);
+    }
+
+    function directReplayLinks(replayState) {
+      if (!replayState || replayState.loading || replayState.error) return "-";
+      const tasks = Array.isArray(replayState.tasks) ? replayState.tasks : [];
+      if (!tasks.length) return "-";
+      return tasks
+        .slice(0, 6)
+        .map((item) => '<button type="button" class="link-btn" data-select-task-id="' + escapeHTML(item.id || "") + '">' + escapeHTML(compactText(item.id || "-", 16)) + '</button>')
+        .join(" | ");
+    }
+
+    async function loadDirectReplays(taskID) {
+      const id = String(taskID || "").trim();
+      if (!id) return;
+      const existing = state.directReplays[id];
+      if (existing && (existing.loading || existing.loaded)) return;
+
+      state.directReplays[id] = { loading: true, loaded: false, tasks: [], error: "" };
+      if (state.selectedTaskID === id) {
+        renderDetail();
+      }
+
+      try {
+        const payload = await requestJSON('/v1/tasks/' + encodeURIComponent(id) + '/replays?limit=200');
+        state.directReplays[id] = {
+          loading: false,
+          loaded: true,
+          tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
+          error: ""
+        };
+      } catch (error) {
+        state.directReplays[id] = {
+          loading: false,
+          loaded: true,
+          tasks: [],
+          error: error.message
+        };
+      }
+
+      if (state.selectedTaskID === id) {
+        renderDetail();
+      }
+    }
+
     function updateClock() {
       document.getElementById("clock").textContent = new Date().toLocaleString();
     }
@@ -1256,6 +1309,9 @@
         : '-';
       const chainState = state.replayChains[task.id || ""];
       const chainText = replayChainSummary(chainState);
+      const directReplayState = state.directReplays[task.id || ""];
+      const directReplayCount = directReplaySummary(directReplayState);
+      const directReplayIDs = directReplayLinks(directReplayState);
 
       taskDetailEl.innerHTML = (
         '<div class="detail-header">' +
@@ -1269,6 +1325,8 @@
           '<div class="pair"><span class="k">Goal</span><span class="v">' + escapeHTML(task.goal || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Source Task</span><span class="v">' + sourceTask + '</span></div>' +
           '<div class="pair"><span class="k">Replay Chain</span><span class="v mono">' + escapeHTML(chainText) + '</span></div>' +
+          '<div class="pair"><span class="k">Direct Replays</span><span class="v">' + escapeHTML(directReplayCount) + '</span></div>' +
+          '<div class="pair"><span class="k">Replay IDs</span><span class="v">' + directReplayIDs + '</span></div>' +
           '<div class="pair"><span class="k">URL</span><span class="v">' + escapeHTML(task.url || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Final URL</span><span class="v">' + escapeHTML(task.final_url || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Node ID</span><span class="v mono">' + escapeHTML(task.node_id || '-') + '</span></div>' +
@@ -1308,6 +1366,9 @@
 
       if (!chainState || (!chainState.loading && !chainState.loaded)) {
         void loadReplayChain(task.id || "");
+      }
+      if (!directReplayState || (!directReplayState.loading && !directReplayState.loaded)) {
+        void loadDirectReplays(task.id || "");
       }
     }
 
