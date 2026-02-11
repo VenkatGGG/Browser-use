@@ -330,6 +330,88 @@ func (s *Server) listRecentTasks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+
+	limit := 300
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			httpx.WriteError(w, http.StatusBadRequest, "invalid_limit", "limit must be a positive integer")
+			return
+		}
+		if parsed > 1000 {
+			parsed = 1000
+		}
+		limit = parsed
+	}
+
+	items, err := s.tasks.ListRecent(r.Context(), limit)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "stats_failed", err.Error())
+		return
+	}
+
+	statusCounts := map[string]int{
+		string(task.StatusQueued):    0,
+		string(task.StatusRunning):   0,
+		string(task.StatusCompleted): 0,
+		string(task.StatusFailed):    0,
+	}
+	blockerCounts := make(map[string]int)
+	blocked := 0
+	terminal := 0
+	completed := 0
+
+	for _, item := range items {
+		statusKey := strings.TrimSpace(string(item.Status))
+		if statusKey == "" {
+			statusKey = "unknown"
+		}
+		statusCounts[statusKey]++
+
+		if item.Status == task.StatusCompleted || item.Status == task.StatusFailed {
+			terminal++
+		}
+		if item.Status == task.StatusCompleted {
+			completed++
+		}
+		if strings.TrimSpace(item.BlockerType) != "" {
+			blocked++
+			blockerCounts[item.BlockerType]++
+		}
+	}
+
+	successRate := 0
+	if terminal > 0 {
+		successRate = int(float64(completed*100) / float64(terminal))
+	}
+	blockRate := 0
+	failedCount := statusCounts[string(task.StatusFailed)]
+	if failedCount > 0 {
+		blockRate = int(float64(blocked*100) / float64(failedCount))
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"window": map[string]any{
+			"limit":   limit,
+			"fetched": len(items),
+		},
+		"totals": map[string]any{
+			"tasks":    len(items),
+			"terminal": terminal,
+			"blocked":  blocked,
+		},
+		"status_counts":        statusCounts,
+		"blocker_counts":       blockerCounts,
+		"success_rate_percent": successRate,
+		"block_rate_percent":   blockRate,
+	})
+}
+
 func mapTaskActions(actions []taskActionRequest) []task.Action {
 	mapped := make([]task.Action, 0, len(actions))
 	for _, action := range actions {

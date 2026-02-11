@@ -48,6 +48,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/sessions", s.handleSessions)
 	mux.HandleFunc("/v1/sessions/", s.handleSessionByID)
 	mux.HandleFunc("/v1/tasks", s.handleTasks)
+	mux.HandleFunc("/v1/tasks/stats", s.handleTaskStats)
 	mux.HandleFunc("/v1/tasks/", s.handleTaskByID)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/register", s.handleNodeRegister)

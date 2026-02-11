@@ -229,6 +229,126 @@ func TestListRecentTasksInvalidLimit(t *testing.T) {
 	}
 }
 
+func TestTaskStats(t *testing.T) {
+	svc := task.NewInMemoryService()
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		nil,
+		1,
+		"",
+		nil,
+	)
+
+	first, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID: "sess_1",
+		URL:       "https://example.com/1",
+		Goal:      "one",
+	})
+	if err != nil {
+		t.Fatalf("create first task: %v", err)
+	}
+	if _, err := svc.Complete(context.Background(), task.CompleteInput{
+		TaskID:    first.ID,
+		Completed: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("complete first task: %v", err)
+	}
+
+	second, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID: "sess_2",
+		URL:       "https://example.com/2",
+		Goal:      "two",
+	})
+	if err != nil {
+		t.Fatalf("create second task: %v", err)
+	}
+	if _, err := svc.Fail(context.Background(), task.FailInput{
+		TaskID:         second.ID,
+		Completed:      time.Now().UTC(),
+		Error:          "blocked",
+		BlockerType:    "human_verification_required",
+		BlockerMessage: "challenge",
+	}); err != nil {
+		t.Fatalf("fail second task: %v", err)
+	}
+
+	third, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID: "sess_3",
+		URL:       "https://example.com/3",
+		Goal:      "three",
+	})
+	if err != nil {
+		t.Fatalf("create third task: %v", err)
+	}
+	if _, err := svc.Fail(context.Background(), task.FailInput{
+		TaskID:    third.ID,
+		Completed: time.Now().UTC(),
+		Error:     "other error",
+	}); err != nil {
+		t.Fatalf("fail third task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/stats?limit=10", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		StatusCounts       map[string]int `json:"status_counts"`
+		SuccessRatePercent int            `json:"success_rate_percent"`
+		BlockRatePercent   int            `json:"block_rate_percent"`
+		Totals             struct {
+			Tasks   int `json:"tasks"`
+			Blocked int `json:"blocked"`
+		} `json:"totals"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode stats response: %v", err)
+	}
+	if payload.Totals.Tasks != 3 {
+		t.Fatalf("expected totals.tasks 3, got %d", payload.Totals.Tasks)
+	}
+	if payload.Totals.Blocked != 1 {
+		t.Fatalf("expected totals.blocked 1, got %d", payload.Totals.Blocked)
+	}
+	if payload.StatusCounts[string(task.StatusCompleted)] != 1 {
+		t.Fatalf("expected completed count 1, got %d", payload.StatusCounts[string(task.StatusCompleted)])
+	}
+	if payload.StatusCounts[string(task.StatusFailed)] != 2 {
+		t.Fatalf("expected failed count 2, got %d", payload.StatusCounts[string(task.StatusFailed)])
+	}
+	if payload.SuccessRatePercent != 33 {
+		t.Fatalf("expected success rate 33, got %d", payload.SuccessRatePercent)
+	}
+	if payload.BlockRatePercent != 50 {
+		t.Fatalf("expected block rate 50, got %d", payload.BlockRatePercent)
+	}
+}
+
+func TestTaskStatsInvalidLimit(t *testing.T) {
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		nil,
+		1,
+		"",
+		nil,
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/stats?limit=abc", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestReplayTaskQueued(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
 	svc := task.NewInMemoryService()

@@ -172,5 +172,6 @@ make run-orchestrator
 - Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
 - Supported deterministic action types include `wait_for`, `click`, `type`, `wait`, `press_enter`, and `wait_for_url_contains`.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
+- `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.
 - Node-agent now detects blocker pages (captcha/human verification/form validation), returns structured blocker metadata, and runner persists blocker evidence on failed tasks without retry loops.
 - Runner applies per-domain cooldowns after challenge blockers (`human_verification_required` / `bot_blocked`) to fail subsequent tasks fast until cooldown expires.

@@ -943,6 +943,7 @@
       lastCreatedTaskID: "",
       replayChains: {},
       directReplays: {},
+      taskStats: null,
       refreshMs: 3000,
       taskLimit: 120,
       isLive: true,
@@ -1170,19 +1171,22 @@
     function updateKPIs() {
       const tasks = state.tasks;
       const nodes = state.nodes;
+      const stats = state.taskStats;
       const ready = nodes.filter((node) => node.state === "ready").length;
-      const queued = tasks.filter((task) => task.status === "queued").length;
-      const running = tasks.filter((task) => task.status === "running").length;
-      const blocked = tasks.filter((task) => Boolean(task.blocker_type)).length;
+      const queued = stats && stats.status_counts ? Number(stats.status_counts.queued || 0) : tasks.filter((task) => task.status === "queued").length;
+      const running = stats && stats.status_counts ? Number(stats.status_counts.running || 0) : tasks.filter((task) => task.status === "running").length;
+      const blocked = stats && stats.totals ? Number(stats.totals.blocked || 0) : tasks.filter((task) => Boolean(task.blocker_type)).length;
+      const successRate = Number.isFinite(stats && stats.success_rate_percent) ? String(stats.success_rate_percent) + "%" : taskSuccessRate(tasks);
+      const blockRate = Number.isFinite(stats && stats.block_rate_percent) ? String(stats.block_rate_percent) + "%" : taskBlockRate(tasks);
 
       document.getElementById("kpi-nodes").textContent = String(nodes.length);
       document.getElementById("kpi-ready").textContent = String(ready);
       document.getElementById("kpi-queued").textContent = String(queued);
       document.getElementById("kpi-running").textContent = String(running);
-      document.getElementById("kpi-success").textContent = taskSuccessRate(tasks);
+      document.getElementById("kpi-success").textContent = successRate;
       document.getElementById("kpi-runtime").textContent = avgRuntime(tasks);
       document.getElementById("kpi-blocked").textContent = String(blocked);
-      document.getElementById("kpi-block-rate").textContent = taskBlockRate(tasks);
+      document.getElementById("kpi-block-rate").textContent = blockRate;
       document.getElementById("kpi-nodes-note").textContent = ready + " ready / " + nodes.length + " total";
     }
 
@@ -1414,6 +1418,7 @@
         ' | tasks=' + state.tasks.length +
         ' | filtered=' + state.filteredTasks.length +
         ' | blocked=' + state.tasks.filter((task) => Boolean(task.blocker_type)).length +
+        ' | stats_window=' + (state.taskStats && state.taskStats.window ? String(state.taskStats.window.fetched || 0) : 'n/a') +
         ' | live=' + (state.isLive ? 'on' : 'off') +
         ' | interval=' + state.refreshMs + 'ms';
     }
@@ -1442,13 +1447,15 @@
     async function refreshDashboard() {
       const now = new Date();
       try {
-        const [nodeResp, taskResp] = await Promise.all([
+        const [nodeResp, taskResp, statsResp] = await Promise.all([
           requestJSON('/v1/nodes'),
-          requestJSON('/v1/tasks?limit=' + encodeURIComponent(state.taskLimit))
+          requestJSON('/v1/tasks?limit=' + encodeURIComponent(state.taskLimit)),
+          requestJSON('/v1/tasks/stats?limit=1000')
         ]);
 
         state.nodes = Array.isArray(nodeResp.nodes) ? nodeResp.nodes : [];
         state.tasks = Array.isArray(taskResp.tasks) ? taskResp.tasks : [];
+        state.taskStats = statsResp && typeof statsResp === 'object' && statsResp.status_counts ? statsResp : null;
 
         const exists = state.tasks.some((task) => task.id === state.selectedTaskID);
         if (!exists) {
