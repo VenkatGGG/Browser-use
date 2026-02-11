@@ -158,7 +158,15 @@ func (c *Client) WaitForSelector(ctx context.Context, selector string, timeout t
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	expression := fmt.Sprintf(`(() => !!document.querySelector(%q))()`, selector)
+	expression := fmt.Sprintf(`(() => {
+	const visible = (el) => {
+		const style = window.getComputedStyle(el);
+		if (!style || style.display === "none" || style.visibility === "hidden") return false;
+		const rect = el.getBoundingClientRect();
+		return rect.width > 1 && rect.height > 1;
+	};
+	return Array.from(document.querySelectorAll(%q)).some(visible);
+	})()`, selector)
 	for {
 		value, err := c.EvaluateAny(waitCtx, expression)
 		if err != nil {
@@ -183,12 +191,19 @@ func (c *Client) ClickSelector(ctx context.Context, selector string) error {
 	}
 
 	expression := fmt.Sprintf(`(() => {
-const el = document.querySelector(%q);
-if (!el) return "not_found";
-el.scrollIntoView({block:"center", inline:"center"});
-el.click();
-return "ok";
-})()`, selector)
+	const visible = (node) => {
+		const style = window.getComputedStyle(node);
+		if (!style || style.display === "none" || style.visibility === "hidden") return false;
+		const rect = node.getBoundingClientRect();
+		return rect.width > 1 && rect.height > 1;
+	};
+	const el = Array.from(document.querySelectorAll(%q)).find(visible);
+	if (!el) return "not_found";
+	el.scrollIntoView({block:"center", inline:"center"});
+	if (typeof el.focus === "function") el.focus();
+	el.click();
+	return "ok";
+	})()`, selector)
 
 	result, err := c.EvaluateString(ctx, expression)
 	if err != nil {
@@ -207,16 +222,22 @@ func (c *Client) TypeIntoSelector(ctx context.Context, selector, text string) er
 	}
 
 	expression := fmt.Sprintf(`(() => {
-const el = document.querySelector(%q);
-if (!el) return "not_found";
-el.scrollIntoView({block:"center", inline:"center"});
-el.focus();
-if (!("value" in el)) return "not_input";
-el.value = %q;
-el.dispatchEvent(new Event("input", {bubbles: true}));
-el.dispatchEvent(new Event("change", {bubbles: true}));
-return "ok";
-})()`, selector, text)
+	const visible = (node) => {
+		const style = window.getComputedStyle(node);
+		if (!style || style.display === "none" || style.visibility === "hidden") return false;
+		const rect = node.getBoundingClientRect();
+		return rect.width > 1 && rect.height > 1;
+	};
+	const el = Array.from(document.querySelectorAll(%q)).find(visible);
+	if (!el) return "not_found";
+	el.scrollIntoView({block:"center", inline:"center"});
+	el.focus();
+	if ("value" in el) {
+		el.value = "";
+		el.dispatchEvent(new Event("input", {bubbles: true}));
+	}
+	return "ok";
+	})()`, selector)
 
 	result, err := c.EvaluateString(ctx, expression)
 	if err != nil {
@@ -225,6 +246,57 @@ return "ok";
 	if result != "ok" {
 		return fmt.Errorf("type failed: %s", result)
 	}
+	if err := c.Call(ctx, "Input.insertText", map[string]any{"text": text}, nil); err != nil {
+		return fmt.Errorf("type failed: insert text: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) PressEnterOnSelector(ctx context.Context, selector string) error {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return errors.New("selector is required")
+	}
+
+	focusExpression := fmt.Sprintf(`(() => {
+		const visible = (node) => {
+			const style = window.getComputedStyle(node);
+			if (!style || style.display === "none" || style.visibility === "hidden") return false;
+			const rect = node.getBoundingClientRect();
+			return rect.width > 1 && rect.height > 1;
+		};
+		const el = Array.from(document.querySelectorAll(%q)).find(visible);
+		if (!el) return "not_found";
+		el.scrollIntoView({block:"center", inline:"center"});
+		el.focus();
+		return "ok";
+		})()`, selector)
+
+	result, err := c.EvaluateString(ctx, focusExpression)
+	if err != nil {
+		return err
+	}
+	if result != "ok" {
+		return fmt.Errorf("press_enter failed: %s", result)
+	}
+
+	for _, eventType := range []string{"keyDown", "char", "keyUp"} {
+		payload := map[string]any{
+			"type":                  eventType,
+			"key":                   "Enter",
+			"code":                  "Enter",
+			"windowsVirtualKeyCode": 13,
+			"nativeVirtualKeyCode":  13,
+		}
+		if eventType == "char" {
+			payload["text"] = "\r"
+			payload["unmodifiedText"] = "\r"
+		}
+		if err := c.Call(ctx, "Input.dispatchKeyEvent", payload, nil); err != nil {
+			return fmt.Errorf("dispatch enter %s: %w", eventType, err)
+		}
+	}
+
 	return nil
 }
 

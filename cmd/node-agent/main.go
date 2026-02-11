@@ -32,6 +32,7 @@ type config struct {
 	CDPBaseURL        string
 	RenderDelay       time.Duration
 	ExecuteTimeout    time.Duration
+	PlannerMode       string
 }
 
 type registerNodeRequest struct {
@@ -71,6 +72,7 @@ type browserExecutor struct {
 	cdpBaseURL     string
 	renderDelay    time.Duration
 	executeTimeout time.Duration
+	planner        actionPlanner
 	mu             sync.Mutex
 }
 
@@ -79,11 +81,12 @@ func newBrowserExecutor(cfg config) *browserExecutor {
 		cdpBaseURL:     cfg.CDPBaseURL,
 		renderDelay:    cfg.RenderDelay,
 		executeTimeout: cfg.ExecuteTimeout,
+		planner:        newActionPlanner(cfg.PlannerMode),
 	}
 }
 
 func (e *browserExecutor) Execute(ctx context.Context, targetURL string) (executeResponse, error) {
-	return e.ExecuteWithActions(ctx, targetURL, nil)
+	return e.ExecuteWithActions(ctx, targetURL, "", nil)
 }
 
 func (e *browserExecutor) dialWithRetry(ctx context.Context) (*cdp.Client, error) {
@@ -104,7 +107,7 @@ func (e *browserExecutor) dialWithRetry(ctx context.Context) (*cdp.Client, error
 	return nil, fmt.Errorf("dial cdp after retries: %w", lastErr)
 }
 
-func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL string, actions []executeAction) (executeResponse, error) {
+func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goal string, actions []executeAction) (executeResponse, error) {
 	url := strings.TrimSpace(targetURL)
 	if url == "" {
 		return executeResponse{}, errors.New("url is required")
@@ -134,7 +137,23 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL stri
 		}
 	}
 
-	for index, action := range actions {
+	executionActions := append([]executeAction(nil), actions...)
+	if len(executionActions) == 0 && strings.TrimSpace(goal) != "" && e.planner != nil {
+		snapshot, err := capturePageSnapshot(runCtx, client)
+		if err != nil {
+			log.Printf("goal planning skipped (snapshot failed): task goal=%q err=%v", goal, err)
+		} else {
+			planned, err := e.planner.Plan(runCtx, goal, snapshot)
+			if err != nil {
+				log.Printf("goal planning skipped (planner failed): planner=%s goal=%q err=%v", e.planner.Name(), goal, err)
+			} else if len(planned) > 0 {
+				executionActions = planned
+				log.Printf("planner=%s generated %d actions for goal=%q actions=%s", e.planner.Name(), len(planned), goal, summarizeActions(planned))
+			}
+		}
+	}
+
+	for index, action := range executionActions {
 		if err := e.applyAction(runCtx, client, action); err != nil {
 			return executeResponse{}, fmt.Errorf("action %d (%s) failed: %w", index+1, action.Type, err)
 		}
@@ -182,9 +201,6 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		if selector == "" {
 			return errors.New("selector is required for click")
 		}
-		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
-			return err
-		}
 		return client.ClickSelector(actionCtx, selector)
 	case "type":
 		selector := strings.TrimSpace(action.Selector)
@@ -217,6 +233,24 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		case <-time.After(delay):
 			return nil
 		}
+	case "press_enter":
+		selector := strings.TrimSpace(action.Selector)
+		if selector == "" {
+			return errors.New("selector is required for press_enter")
+		}
+		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
+			return err
+		}
+		return client.PressEnterOnSelector(actionCtx, selector)
+	case "submit_search":
+		selector := strings.TrimSpace(action.Selector)
+		if selector == "" {
+			return errors.New("selector is required for submit_search")
+		}
+		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
+			return err
+		}
+		return client.PressEnterOnSelector(actionCtx, selector)
 	default:
 		return fmt.Errorf("unsupported action type %q", actionType)
 	}
@@ -227,6 +261,22 @@ func actionTimeout(timeoutMS int) time.Duration {
 		return 12 * time.Second
 	}
 	return time.Duration(timeoutMS) * time.Millisecond
+}
+
+func summarizeActions(actions []executeAction) string {
+	if len(actions) == 0 {
+		return "[]"
+	}
+	parts := make([]string, 0, len(actions))
+	for _, action := range actions {
+		label := strings.TrimSpace(action.Type)
+		selector := strings.TrimSpace(action.Selector)
+		if selector != "" {
+			label += "(" + selector + ")"
+		}
+		parts = append(parts, label)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 func main() {
@@ -309,6 +359,7 @@ func loadConfig() config {
 		CDPBaseURL:        envOrDefault("NODE_AGENT_CDP_BASE_URL", "http://127.0.0.1:9222"),
 		RenderDelay:       durationOrDefault("NODE_AGENT_RENDER_DELAY", 2*time.Second),
 		ExecuteTimeout:    durationOrDefault("NODE_AGENT_EXECUTE_TIMEOUT", 45*time.Second),
+		PlannerMode:       envOrDefault("NODE_AGENT_PLANNER_MODE", "heuristic"),
 	}
 }
 
@@ -330,7 +381,7 @@ func routes(executor *browserExecutor) http.Handler {
 			return
 		}
 
-		result, err := executor.ExecuteWithActions(r.Context(), req.URL, req.Actions)
+		result, err := executor.ExecuteWithActions(r.Context(), req.URL, req.Goal, req.Actions)
 		if err != nil {
 			httpx.WriteError(w, http.StatusBadGateway, "execution_failed", err.Error())
 			return

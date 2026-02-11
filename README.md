@@ -51,6 +51,8 @@ Local-first orchestration infrastructure for AI browser automation.
     - `ORCHESTRATOR_TASK_MAX_RETRIES`
     - `ORCHESTRATOR_TASK_RETRY_BASE_DELAY`
     - `ORCHESTRATOR_TASK_RETRY_MAX_DELAY`
+- When `actions` is omitted, node-agent can auto-plan simple search flows from `goal`
+  using a lightweight page snapshot heuristic planner (`NODE_AGENT_PLANNER_MODE=heuristic`).
 
 ## Quick start
 
@@ -133,3 +135,4 @@ make run-orchestrator
 - Queued tasks are reconciled from Postgres on runner startup/restart.
 - Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
+- Supported deterministic action types include `wait_for`, `click`, `type`, `wait`, and `press_enter`.
