@@ -361,6 +361,9 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_status_retry
 ON tasks (status, next_retry_at);
 
+CREATE INDEX IF NOT EXISTS idx_tasks_source_task_id_created
+ON tasks (source_task_id, created_at DESC);
+
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocker_type TEXT NULL;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocker_message TEXT NULL;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source_task_id TEXT NULL;

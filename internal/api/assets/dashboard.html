@@ -1112,6 +1112,7 @@
       if (!replayState) return "not loaded";
       if (replayState.loading) return "loading...";
       if (replayState.error) return "unavailable: " + replayState.error;
+      if (Number.isFinite(replayState.count)) return String(replayState.count);
       const tasks = Array.isArray(replayState.tasks) ? replayState.tasks : [];
       if (!tasks.length) return "0";
       return String(tasks.length);
@@ -1133,7 +1134,7 @@
       const existing = state.directReplays[id];
       if (existing && (existing.loading || existing.loaded)) return;
 
-      state.directReplays[id] = { loading: true, loaded: false, tasks: [], error: "" };
+      state.directReplays[id] = { loading: true, loaded: false, tasks: [], count: 0, error: "" };
       if (state.selectedTaskID === id) {
         renderDetail();
       }
@@ -1144,6 +1145,7 @@
           loading: false,
           loaded: true,
           tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
+          count: Number.isFinite(payload.count) ? payload.count : (Array.isArray(payload.tasks) ? payload.tasks.length : 0),
           error: ""
         };
       } catch (error) {
@@ -1151,6 +1153,7 @@
           loading: false,
           loaded: true,
           tasks: [],
+          count: 0,
           error: error.message
         };
       }
