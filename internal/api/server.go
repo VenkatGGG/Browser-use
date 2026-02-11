@@ -1,24 +1,28 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
-	"github.com/VenkatGGG/Browser-use/internal/nodeclient"
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/session"
 	"github.com/VenkatGGG/Browser-use/internal/task"
 	"github.com/VenkatGGG/Browser-use/pkg/httpx"
 )
 
-type Server struct {
-	sessions session.Service
-	tasks    task.Service
-	nodes    pool.Registry
-	executor nodeclient.Client
+type TaskDispatcher interface {
+	Enqueue(ctx context.Context, taskID string) error
 }
 
-func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry, executor nodeclient.Client) *Server {
-	return &Server{sessions: sessions, tasks: tasks, nodes: nodes, executor: executor}
+type Server struct {
+	sessions   session.Service
+	tasks      task.Service
+	nodes      pool.Registry
+	dispatcher TaskDispatcher
+}
+
+func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry, dispatcher TaskDispatcher) *Server {
+	return &Server{sessions: sessions, tasks: tasks, nodes: nodes, dispatcher: dispatcher}
 }
 
 func (s *Server) Routes() http.Handler {

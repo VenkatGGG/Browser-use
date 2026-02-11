@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/VenkatGGG/Browser-use/internal/nodeclient"
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/session"
 	"github.com/VenkatGGG/Browser-use/internal/task"
@@ -18,7 +17,7 @@ func TestHealthz(t *testing.T) {
 		session.NewInMemoryService(),
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
-		nodeclient.NoopClient{},
+		nil,
 	)
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rr := httptest.NewRecorder()
@@ -35,7 +34,7 @@ func TestNodeRegisterAndList(t *testing.T) {
 		session.NewInMemoryService(),
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
-		nodeclient.NoopClient{},
+		nil,
 	)
 
 	registerBody := map[string]string{

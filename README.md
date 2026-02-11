@@ -35,7 +35,7 @@ Local-first orchestration infrastructure for AI browser automation.
 - `node-agent` auto-registers with orchestrator and sends periodic heartbeats.
 
 ### Phase 3 started (brain execution baseline)
-- Orchestrator now executes task requests against a ready node, not just queuing.
+- Orchestrator now enqueues task requests and executes them asynchronously in background workers.
 - `node-agent` exposes `POST /v1/execute` and runs CDP actions:
   - open URL
   - deterministic action primitives: `wait_for`, `click`, `type`, `wait`
@@ -44,6 +44,7 @@ Local-first orchestration infrastructure for AI browser automation.
   - extract page title + final URL
 - Task lifecycle is tracked:
   - `queued -> running -> completed|failed`
+- `POST /v1/tasks` returns immediately (`202 Accepted`); use `GET /v1/tasks/{id}` for progress/result.
 
 ## Quick start
 
@@ -93,7 +94,12 @@ curl -sS -X POST http://localhost:8080/v1/tasks \\
   }'
 ```
 
-7. Run tests:
+7. Poll task status:
+```bash
+curl -sS http://localhost:8080/v1/tasks/task_000001
+```
+
+8. Run tests:
 ```bash
 make test
 ```

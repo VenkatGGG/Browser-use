@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/VenkatGGG/Browser-use/internal/api"
 	"github.com/VenkatGGG/Browser-use/internal/config"
@@ -10,17 +15,29 @@ import (
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/session"
 	"github.com/VenkatGGG/Browser-use/internal/task"
+	"github.com/VenkatGGG/Browser-use/internal/taskrunner"
 )
 
 func main() {
 	cfg := config.Load()
-	log.Printf("config loaded: redis=%s postgres=%s", cfg.RedisAddr, cfg.PostgresDSN)
+	log.Printf("config loaded: redis=%s postgres=%s queue_size=%d workers=%d", cfg.RedisAddr, cfg.PostgresDSN, cfg.TaskQueueSize, cfg.TaskWorkers)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	sessionSvc := session.NewInMemoryService()
 	taskSvc := task.NewInMemoryService()
 	nodeRegistry := pool.NewInMemoryRegistry()
 	executor := nodeclient.NewHTTPClient(cfg.NodeExecuteTimeout)
-	server := api.NewServer(sessionSvc, taskSvc, nodeRegistry, executor)
+
+	runner := taskrunner.New(taskSvc, nodeRegistry, executor, taskrunner.Config{
+		QueueSize:       cfg.TaskQueueSize,
+		Workers:         cfg.TaskWorkers,
+		NodeWaitTimeout: cfg.NodeWaitTimeout,
+	}, log.Default())
+	runner.Start(ctx)
+
+	server := api.NewServer(sessionSvc, taskSvc, nodeRegistry, runner)
 
 	httpServer := &http.Server{
 		Addr:         cfg.HTTPAddr,
@@ -30,8 +47,17 @@ func main() {
 		IdleTimeout:  cfg.IdleTimeout,
 	}
 
-	log.Printf("orchestrator listening on %s", cfg.HTTPAddr)
-	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("orchestrator failed: %v", err)
+	go func() {
+		log.Printf("orchestrator listening on %s", cfg.HTTPAddr)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("orchestrator failed: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("orchestrator shutdown error: %v", err)
 	}
 }
