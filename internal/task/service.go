@@ -12,16 +12,26 @@ import (
 type Status string
 
 const (
-	StatusQueued Status = "queued"
+	StatusQueued    Status = "queued"
+	StatusRunning   Status = "running"
+	StatusCompleted Status = "completed"
+	StatusFailed    Status = "failed"
 )
 
 type Task struct {
-	ID        string    `json:"id"`
-	SessionID string    `json:"session_id"`
-	URL       string    `json:"url"`
-	Goal      string    `json:"goal"`
-	Status    Status    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID               string     `json:"id"`
+	SessionID        string     `json:"session_id"`
+	URL              string     `json:"url"`
+	Goal             string     `json:"goal"`
+	Status           Status     `json:"status"`
+	NodeID           string     `json:"node_id,omitempty"`
+	PageTitle        string     `json:"page_title,omitempty"`
+	FinalURL         string     `json:"final_url,omitempty"`
+	ScreenshotBase64 string     `json:"screenshot_base64,omitempty"`
+	ErrorMessage     string     `json:"error_message,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
 }
 
 type CreateInput struct {
@@ -30,8 +40,36 @@ type CreateInput struct {
 	Goal      string
 }
 
+type StartInput struct {
+	TaskID  string
+	NodeID  string
+	Started time.Time
+}
+
+type CompleteInput struct {
+	TaskID           string
+	NodeID           string
+	Completed        time.Time
+	PageTitle        string
+	FinalURL         string
+	ScreenshotBase64 string
+}
+
+type FailInput struct {
+	TaskID     string
+	NodeID     string
+	Completed  time.Time
+	Error      string
+	PageTitle  string
+	FinalURL   string
+	Screenshot string
+}
+
 type Service interface {
 	Create(ctx context.Context, input CreateInput) (Task, error)
+	Start(ctx context.Context, input StartInput) (Task, error)
+	Complete(ctx context.Context, input CompleteInput) (Task, error)
+	Fail(ctx context.Context, input FailInput) (Task, error)
 	Get(ctx context.Context, id string) (Task, error)
 }
 
@@ -73,6 +111,63 @@ func (s *InMemoryService) Create(_ context.Context, input CreateInput) (Task, er
 	return created, nil
 }
 
+func (s *InMemoryService) Start(_ context.Context, input StartInput) (Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	task, ok := s.items[input.TaskID]
+	if !ok {
+		return Task{}, errors.New("task not found")
+	}
+	now := normalizeTime(input.Started)
+	task.Status = StatusRunning
+	task.NodeID = input.NodeID
+	task.StartedAt = &now
+	task.ErrorMessage = ""
+	s.items[input.TaskID] = task
+	return task, nil
+}
+
+func (s *InMemoryService) Complete(_ context.Context, input CompleteInput) (Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	task, ok := s.items[input.TaskID]
+	if !ok {
+		return Task{}, errors.New("task not found")
+	}
+	now := normalizeTime(input.Completed)
+	task.Status = StatusCompleted
+	task.NodeID = input.NodeID
+	task.PageTitle = input.PageTitle
+	task.FinalURL = input.FinalURL
+	task.ScreenshotBase64 = input.ScreenshotBase64
+	task.ErrorMessage = ""
+	task.CompletedAt = &now
+	s.items[input.TaskID] = task
+	return task, nil
+}
+
+func (s *InMemoryService) Fail(_ context.Context, input FailInput) (Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	task, ok := s.items[input.TaskID]
+	if !ok {
+		return Task{}, errors.New("task not found")
+	}
+	now := normalizeTime(input.Completed)
+	task.Status = StatusFailed
+	task.NodeID = input.NodeID
+	task.PageTitle = input.PageTitle
+	task.FinalURL = input.FinalURL
+	task.ScreenshotBase64 = input.Screenshot
+	task.ErrorMessage = input.Error
+	task.CompletedAt = &now
+	s.items[input.TaskID] = task
+	return task, nil
+}
+
 func (s *InMemoryService) Get(_ context.Context, id string) (Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -81,4 +176,11 @@ func (s *InMemoryService) Get(_ context.Context, id string) (Task, error) {
 		return Task{}, errors.New("task not found")
 	}
 	return found, nil
+}
+
+func normalizeTime(input time.Time) time.Time {
+	if input.IsZero() {
+		return time.Now().UTC()
+	}
+	return input.UTC()
 }

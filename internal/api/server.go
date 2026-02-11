@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/VenkatGGG/Browser-use/internal/nodeclient"
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/session"
 	"github.com/VenkatGGG/Browser-use/internal/task"
@@ -13,10 +14,11 @@ type Server struct {
 	sessions session.Service
 	tasks    task.Service
 	nodes    pool.Registry
+	executor nodeclient.Client
 }
 
-func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry) *Server {
-	return &Server{sessions: sessions, tasks: tasks, nodes: nodes}
+func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry, executor nodeclient.Client) *Server {
+	return &Server{sessions: sessions, tasks: tasks, nodes: nodes, executor: executor}
 }
 
 func (s *Server) Routes() http.Handler {

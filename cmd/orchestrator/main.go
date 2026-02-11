@@ -6,6 +6,7 @@ import (
 
 	"github.com/VenkatGGG/Browser-use/internal/api"
 	"github.com/VenkatGGG/Browser-use/internal/config"
+	"github.com/VenkatGGG/Browser-use/internal/nodeclient"
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/session"
 	"github.com/VenkatGGG/Browser-use/internal/task"
@@ -18,7 +19,8 @@ func main() {
 	sessionSvc := session.NewInMemoryService()
 	taskSvc := task.NewInMemoryService()
 	nodeRegistry := pool.NewInMemoryRegistry()
-	server := api.NewServer(sessionSvc, taskSvc, nodeRegistry)
+	executor := nodeclient.NewHTTPClient(cfg.NodeExecuteTimeout)
+	server := api.NewServer(sessionSvc, taskSvc, nodeRegistry, executor)
 
 	httpServer := &http.Server{
 		Addr:         cfg.HTTPAddr,

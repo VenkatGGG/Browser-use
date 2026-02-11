@@ -13,8 +13,12 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/VenkatGGG/Browser-use/internal/cdp"
+	"github.com/VenkatGGG/Browser-use/pkg/httpx"
 )
 
 type config struct {
@@ -25,6 +29,9 @@ type config struct {
 	AdvertiseAddr     string
 	HeartbeatInterval time.Duration
 	RequestTimeout    time.Duration
+	CDPBaseURL        string
+	RenderDelay       time.Duration
+	ExecuteTimeout    time.Duration
 }
 
 type registerNodeRequest struct {
@@ -39,17 +46,113 @@ type heartbeatNodeRequest struct {
 	Heartbeat string `json:"heartbeat_at"`
 }
 
+type executeRequest struct {
+	TaskID string `json:"task_id"`
+	URL    string `json:"url"`
+	Goal   string `json:"goal"`
+}
+
+type executeResponse struct {
+	PageTitle        string `json:"page_title"`
+	FinalURL         string `json:"final_url"`
+	ScreenshotBase64 string `json:"screenshot_base64"`
+}
+
+type browserExecutor struct {
+	cdpBaseURL     string
+	renderDelay    time.Duration
+	executeTimeout time.Duration
+	mu             sync.Mutex
+}
+
+func newBrowserExecutor(cfg config) *browserExecutor {
+	return &browserExecutor{
+		cdpBaseURL:     cfg.CDPBaseURL,
+		renderDelay:    cfg.RenderDelay,
+		executeTimeout: cfg.ExecuteTimeout,
+	}
+}
+
+func (e *browserExecutor) Execute(ctx context.Context, targetURL string) (executeResponse, error) {
+	url := strings.TrimSpace(targetURL)
+	if url == "" {
+		return executeResponse{}, errors.New("url is required")
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	runCtx, cancel := context.WithTimeout(ctx, e.executeTimeout)
+	defer cancel()
+
+	client, err := e.dialWithRetry(runCtx)
+	if err != nil {
+		return executeResponse{}, err
+	}
+	defer client.Close()
+
+	if err := client.Navigate(runCtx, url); err != nil {
+		return executeResponse{}, err
+	}
+
+	if e.renderDelay > 0 {
+		select {
+		case <-runCtx.Done():
+			return executeResponse{}, runCtx.Err()
+		case <-time.After(e.renderDelay):
+		}
+	}
+
+	title, err := client.EvaluateString(runCtx, "document.title")
+	if err != nil {
+		return executeResponse{}, err
+	}
+	finalURL, err := client.EvaluateString(runCtx, "window.location.href")
+	if err != nil {
+		return executeResponse{}, err
+	}
+	screenshot, err := client.CaptureScreenshot(runCtx)
+	if err != nil {
+		return executeResponse{}, err
+	}
+
+	return executeResponse{
+		PageTitle:        title,
+		FinalURL:         finalURL,
+		ScreenshotBase64: screenshot,
+	}, nil
+}
+
+func (e *browserExecutor) dialWithRetry(ctx context.Context) (*cdp.Client, error) {
+	var lastErr error
+	for attempt := 1; attempt <= 20; attempt++ {
+		client, err := cdp.Dial(ctx, e.cdpBaseURL)
+		if err == nil {
+			return client, nil
+		}
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return nil, fmt.Errorf("dial cdp after retries: %w", lastErr)
+}
+
 func main() {
 	cfg := loadConfig()
+	executor := newBrowserExecutor(cfg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	httpServer := &http.Server{
 		Addr:         cfg.HTTPAddr,
-		Handler:      routes(),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		Handler:      routes(executor),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 90 * time.Second,
 		IdleTimeout:  30 * time.Second,
 	}
 
@@ -115,14 +218,36 @@ func loadConfig() config {
 		AdvertiseAddr:     advertise,
 		HeartbeatInterval: durationOrDefault("NODE_AGENT_HEARTBEAT_INTERVAL", 5*time.Second),
 		RequestTimeout:    durationOrDefault("NODE_AGENT_REQUEST_TIMEOUT", 5*time.Second),
+		CDPBaseURL:        envOrDefault("NODE_AGENT_CDP_BASE_URL", "http://127.0.0.1:9222"),
+		RenderDelay:       durationOrDefault("NODE_AGENT_RENDER_DELAY", 2*time.Second),
+		ExecuteTimeout:    durationOrDefault("NODE_AGENT_EXECUTE_TIMEOUT", 45*time.Second),
 	}
 }
 
-func routes() http.Handler {
+func routes(executor *browserExecutor) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("/v1/execute", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+
+		var req executeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "invalid_json", "request body must be valid JSON")
+			return
+		}
+
+		result, err := executor.Execute(r.Context(), req.URL)
+		if err != nil {
+			httpx.WriteError(w, http.StatusBadGateway, "execution_failed", err.Error())
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, result)
 	})
 	return mux
 }
