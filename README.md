@@ -59,7 +59,8 @@ Local-first orchestration infrastructure for AI browser automation.
 - Dashboard includes:
   - node fleet cards with heartbeat + version metadata
   - live polling controls (pause/resume, refresh interval, fetch limit)
-  - filtered task feed (status/search/artifact/failure/sort)
+  - filtered task feed (status/search/artifact/failure/blocker/sort)
+  - blocker-aware task table column + blocker KPIs (count and rate)
   - selectable task detail panel with metadata, action JSON, and replay
   - screenshot artifact preview modal and failure triage list
   - task submission form with reusable presets (session creation + queue task)

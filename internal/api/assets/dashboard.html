@@ -337,7 +337,7 @@
 
     .filters {
       display: grid;
-      grid-template-columns: 1fr 1.2fr 0.75fr 0.7fr 0.65fr auto;
+      grid-template-columns: 1fr 1.2fr 0.75fr 0.7fr 0.8fr 0.65fr auto;
       gap: 10px;
       align-items: end;
       margin-top: 12px;
@@ -404,6 +404,7 @@
     .pill-running { background: #d7ebff; color: #225f88; }
     .pill-completed { background: #dff5e8; color: #1d7a4d; }
     .pill-failed { background: #f9dfd8; color: #9a3219; }
+    .pill-blocker { background: #fde9d7; color: #a14f1c; }
 
     .tasks-grid {
       margin-top: 10px;
@@ -713,6 +714,16 @@
             <div class="kpi-value" id="kpi-runtime">-</div>
             <div class="tiny">Completed + failed</div>
           </div>
+          <div class="kpi">
+            <div class="kpi-label">Blocked</div>
+            <div class="kpi-value" id="kpi-blocked">0</div>
+            <div class="tiny">Challenge hits</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Block Rate</div>
+            <div class="kpi-value" id="kpi-block-rate">0%</div>
+            <div class="tiny">Blocked / failed</div>
+          </div>
         </div>
       </article>
 
@@ -843,6 +854,14 @@
               </select>
             </div>
             <div class="stack">
+              <label class="label" for="filter-blocker">Blocker</label>
+              <select id="filter-blocker">
+                <option value="all" selected>all</option>
+                <option value="yes">blocked only</option>
+                <option value="no">non-blocked</option>
+              </select>
+            </div>
+            <div class="stack">
               <label class="label" for="sort-order">Sort</label>
               <select id="sort-order">
                 <option value="newest" selected>newest</option>
@@ -865,6 +884,7 @@
                     <th>Attempts</th>
                     <th>Created</th>
                     <th>Duration</th>
+                    <th>Blocker</th>
                     <th>Artifact</th>
                   </tr>
                 </thead>
@@ -917,6 +937,7 @@
         query: "",
         artifact: "all",
         onlyFailed: false,
+        blocker: "all",
         sort: "newest"
       }
     };
@@ -1013,6 +1034,13 @@
       return Math.round((completed / terminal.length) * 100) + "%";
     }
 
+    function taskBlockRate(tasks) {
+      const failed = tasks.filter((task) => task.status === "failed");
+      if (!failed.length) return "0%";
+      const blocked = failed.filter((task) => Boolean(task.blocker_type)).length;
+      return Math.round((blocked / failed.length) * 100) + "%";
+    }
+
     function compactText(value, max) {
       const text = String(value || "");
       if (text.length <= max) return text;
@@ -1029,6 +1057,7 @@
       const ready = nodes.filter((node) => node.state === "ready").length;
       const queued = tasks.filter((task) => task.status === "queued").length;
       const running = tasks.filter((task) => task.status === "running").length;
+      const blocked = tasks.filter((task) => Boolean(task.blocker_type)).length;
 
       document.getElementById("kpi-nodes").textContent = String(nodes.length);
       document.getElementById("kpi-ready").textContent = String(ready);
@@ -1036,6 +1065,8 @@
       document.getElementById("kpi-running").textContent = String(running);
       document.getElementById("kpi-success").textContent = taskSuccessRate(tasks);
       document.getElementById("kpi-runtime").textContent = avgRuntime(tasks);
+      document.getElementById("kpi-blocked").textContent = String(blocked);
+      document.getElementById("kpi-block-rate").textContent = taskBlockRate(tasks);
       document.getElementById("kpi-nodes-note").textContent = ready + " ready / " + nodes.length + " total";
     }
 
@@ -1051,8 +1082,12 @@
         if (state.filters.artifact === "yes" && !hasArtifact) return false;
         if (state.filters.artifact === "no" && hasArtifact) return false;
 
+        const hasBlocker = Boolean(task.blocker_type);
+        if (state.filters.blocker === "yes" && !hasBlocker) return false;
+        if (state.filters.blocker === "no" && hasBlocker) return false;
+
         if (!q) return true;
-        const blob = [task.id, task.goal, task.url, task.final_url, task.node_id, task.error_message]
+        const blob = [task.id, task.goal, task.url, task.final_url, task.node_id, task.error_message, task.blocker_type, task.blocker_message]
           .map((part) => String(part || "").toLowerCase())
           .join(" ");
         return blob.includes(q);
@@ -1119,6 +1154,9 @@
         const artifact = task.screenshot_artifact_url
           ? '<a class="link" href="' + escapeHTML(task.screenshot_artifact_url) + '" data-artifact="' + escapeHTML(task.screenshot_artifact_url) + '">open</a>'
           : '-';
+        const blocker = task.blocker_type
+          ? '<span class="pill pill-blocker" title="' + escapeHTML(task.blocker_message || task.blocker_type) + '">' + escapeHTML(compactText(task.blocker_type, 20)) + '</span>'
+          : '-';
 
         return (
           '<tr data-task-id="' + escapeHTML(task.id) + '"' + rowClass + '>' +
@@ -1130,6 +1168,7 @@
             '<td class="mono">' + escapeHTML(String(task.attempt || 0)) + '/' + escapeHTML(String(task.max_retries || 0)) + '</td>' +
             '<td class="mono">' + escapeHTML(fmtTime(task.created_at)) + '</td>' +
             '<td class="mono">' + escapeHTML(durationForTask(task)) + '</td>' +
+            '<td>' + blocker + '</td>' +
             '<td>' + artifact + '</td>' +
           '</tr>'
         );
@@ -1206,11 +1245,15 @@
       }
 
       errorsEl.innerHTML = failures.map((task) => {
+        const blocker = task.blocker_type
+          ? '<div><strong>blocker:</strong> ' + escapeHTML(task.blocker_type + (task.blocker_message ? ' - ' + task.blocker_message : '')) + '</div>'
+          : '';
         return (
           '<div class="error-item" data-task-id="' + escapeHTML(task.id) + '">' +
             '<div class="error-id">' + escapeHTML(task.id || '-') + '</div>' +
             '<div><strong>goal:</strong> ' + escapeHTML(compactText(task.goal || '-', 120)) + '</div>' +
             '<div><strong>error:</strong> ' + escapeHTML(compactText(task.error_message || '-', 160)) + '</div>' +
+            blocker +
           '</div>'
         );
       }).join('');
@@ -1229,6 +1272,7 @@
         'nodes=' + state.nodes.length +
         ' | tasks=' + state.tasks.length +
         ' | filtered=' + state.filteredTasks.length +
+        ' | blocked=' + state.tasks.filter((task) => Boolean(task.blocker_type)).length +
         ' | live=' + (state.isLive ? 'on' : 'off') +
         ' | interval=' + state.refreshMs + 'ms';
     }
@@ -1496,6 +1540,11 @@
         renderAll();
       });
 
+      document.getElementById('filter-blocker').addEventListener('change', (event) => {
+        state.filters.blocker = event.target.value;
+        renderAll();
+      });
+
       document.getElementById('sort-order').addEventListener('change', (event) => {
         state.filters.sort = event.target.value;
         renderAll();
@@ -1506,12 +1555,14 @@
         state.filters.query = '';
         state.filters.artifact = 'all';
         state.filters.onlyFailed = false;
+        state.filters.blocker = 'all';
         state.filters.sort = 'newest';
 
         document.getElementById('filter-status').value = 'all';
         document.getElementById('filter-query').value = '';
         document.getElementById('filter-artifact').value = 'all';
         document.getElementById('filter-only-failed').value = 'off';
+        document.getElementById('filter-blocker').value = 'all';
         document.getElementById('sort-order').value = 'newest';
         renderAll();
       });
