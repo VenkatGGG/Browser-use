@@ -47,9 +47,18 @@ type heartbeatNodeRequest struct {
 }
 
 type executeRequest struct {
-	TaskID string `json:"task_id"`
-	URL    string `json:"url"`
-	Goal   string `json:"goal"`
+	TaskID  string          `json:"task_id"`
+	URL     string          `json:"url"`
+	Goal    string          `json:"goal"`
+	Actions []executeAction `json:"actions,omitempty"`
+}
+
+type executeAction struct {
+	Type      string `json:"type"`
+	Selector  string `json:"selector,omitempty"`
+	Text      string `json:"text,omitempty"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
+	DelayMS   int    `json:"delay_ms,omitempty"`
 }
 
 type executeResponse struct {
@@ -74,6 +83,28 @@ func newBrowserExecutor(cfg config) *browserExecutor {
 }
 
 func (e *browserExecutor) Execute(ctx context.Context, targetURL string) (executeResponse, error) {
+	return e.ExecuteWithActions(ctx, targetURL, nil)
+}
+
+func (e *browserExecutor) dialWithRetry(ctx context.Context) (*cdp.Client, error) {
+	var lastErr error
+	for attempt := 1; attempt <= 20; attempt++ {
+		client, err := cdp.Dial(ctx, e.cdpBaseURL)
+		if err == nil {
+			return client, nil
+		}
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return nil, fmt.Errorf("dial cdp after retries: %w", lastErr)
+}
+
+func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL string, actions []executeAction) (executeResponse, error) {
 	url := strings.TrimSpace(targetURL)
 	if url == "" {
 		return executeResponse{}, errors.New("url is required")
@@ -103,6 +134,12 @@ func (e *browserExecutor) Execute(ctx context.Context, targetURL string) (execut
 		}
 	}
 
+	for index, action := range actions {
+		if err := e.applyAction(runCtx, client, action); err != nil {
+			return executeResponse{}, fmt.Errorf("action %d (%s) failed: %w", index+1, action.Type, err)
+		}
+	}
+
 	title, err := client.EvaluateString(runCtx, "document.title")
 	if err != nil {
 		return executeResponse{}, err
@@ -123,22 +160,73 @@ func (e *browserExecutor) Execute(ctx context.Context, targetURL string) (execut
 	}, nil
 }
 
-func (e *browserExecutor) dialWithRetry(ctx context.Context) (*cdp.Client, error) {
-	var lastErr error
-	for attempt := 1; attempt <= 20; attempt++ {
-		client, err := cdp.Dial(ctx, e.cdpBaseURL)
-		if err == nil {
-			return client, nil
-		}
-		lastErr = err
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(250 * time.Millisecond):
-		}
+func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, action executeAction) error {
+	actionType := strings.ToLower(strings.TrimSpace(action.Type))
+	if actionType == "" {
+		return errors.New("action type is required")
 	}
-	return nil, fmt.Errorf("dial cdp after retries: %w", lastErr)
+
+	timeout := actionTimeout(action.TimeoutMS)
+	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	switch actionType {
+	case "wait_for":
+		selector := strings.TrimSpace(action.Selector)
+		if selector == "" {
+			return errors.New("selector is required for wait_for")
+		}
+		return client.WaitForSelector(actionCtx, selector, timeout)
+	case "click":
+		selector := strings.TrimSpace(action.Selector)
+		if selector == "" {
+			return errors.New("selector is required for click")
+		}
+		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
+			return err
+		}
+		return client.ClickSelector(actionCtx, selector)
+	case "type":
+		selector := strings.TrimSpace(action.Selector)
+		if selector == "" {
+			return errors.New("selector is required for type")
+		}
+		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
+			return err
+		}
+		if err := client.TypeIntoSelector(actionCtx, selector, action.Text); err != nil {
+			return err
+		}
+		if action.DelayMS > 0 {
+			delay := time.Duration(action.DelayMS) * time.Millisecond
+			select {
+			case <-actionCtx.Done():
+				return actionCtx.Err()
+			case <-time.After(delay):
+			}
+		}
+		return nil
+	case "wait":
+		delay := time.Duration(action.DelayMS) * time.Millisecond
+		if delay <= 0 {
+			delay = 500 * time.Millisecond
+		}
+		select {
+		case <-actionCtx.Done():
+			return actionCtx.Err()
+		case <-time.After(delay):
+			return nil
+		}
+	default:
+		return fmt.Errorf("unsupported action type %q", actionType)
+	}
+}
+
+func actionTimeout(timeoutMS int) time.Duration {
+	if timeoutMS <= 0 {
+		return 12 * time.Second
+	}
+	return time.Duration(timeoutMS) * time.Millisecond
 }
 
 func main() {
@@ -242,7 +330,7 @@ func routes(executor *browserExecutor) http.Handler {
 			return
 		}
 
-		result, err := executor.Execute(r.Context(), req.URL)
+		result, err := executor.ExecuteWithActions(r.Context(), req.URL, req.Actions)
 		if err != nil {
 			httpx.WriteError(w, http.StatusBadGateway, "execution_failed", err.Error())
 			return

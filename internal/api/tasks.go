@@ -13,10 +13,19 @@ import (
 	"github.com/VenkatGGG/Browser-use/pkg/httpx"
 )
 
+type taskActionRequest struct {
+	Type      string `json:"type"`
+	Selector  string `json:"selector,omitempty"`
+	Text      string `json:"text,omitempty"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
+	DelayMS   int    `json:"delay_ms,omitempty"`
+}
+
 type createTaskRequest struct {
-	SessionID string `json:"session_id"`
-	URL       string `json:"url"`
-	Goal      string `json:"goal"`
+	SessionID string              `json:"session_id"`
+	URL       string              `json:"url"`
+	Goal      string              `json:"goal"`
+	Actions   []taskActionRequest `json:"actions,omitempty"`
 }
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
@@ -55,10 +64,12 @@ func (s *Server) createAndExecuteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actions := mapTaskActions(req.Actions)
 	created, err := s.tasks.Create(r.Context(), task.CreateInput{
 		SessionID: strings.TrimSpace(req.SessionID),
 		URL:       strings.TrimSpace(req.URL),
 		Goal:      strings.TrimSpace(req.Goal),
+		Actions:   actions,
 	})
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "create_failed", err.Error())
@@ -86,9 +97,10 @@ func (s *Server) createAndExecuteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.executor.Execute(r.Context(), node.Address, nodeclient.ExecuteInput{
-		TaskID: created.ID,
-		URL:    created.URL,
-		Goal:   created.Goal,
+		TaskID:  created.ID,
+		URL:     created.URL,
+		Goal:    created.Goal,
+		Actions: mapNodeActions(created.Actions),
 	})
 	if err != nil {
 		failed, failErr := s.tasks.Fail(r.Context(), task.FailInput{
@@ -132,4 +144,32 @@ func (s *Server) pickReadyNode(r *http.Request) (pool.Node, error) {
 		}
 	}
 	return pool.Node{}, errors.New("no ready nodes available")
+}
+
+func mapTaskActions(actions []taskActionRequest) []task.Action {
+	mapped := make([]task.Action, 0, len(actions))
+	for _, action := range actions {
+		mapped = append(mapped, task.Action{
+			Type:      strings.TrimSpace(action.Type),
+			Selector:  strings.TrimSpace(action.Selector),
+			Text:      action.Text,
+			TimeoutMS: action.TimeoutMS,
+			DelayMS:   action.DelayMS,
+		})
+	}
+	return mapped
+}
+
+func mapNodeActions(actions []task.Action) []nodeclient.Action {
+	mapped := make([]nodeclient.Action, 0, len(actions))
+	for _, action := range actions {
+		mapped = append(mapped, nodeclient.Action{
+			Type:      action.Type,
+			Selector:  action.Selector,
+			Text:      action.Text,
+			TimeoutMS: action.TimeoutMS,
+			DelayMS:   action.DelayMS,
+		})
+	}
+	return mapped
 }

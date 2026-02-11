@@ -38,6 +38,7 @@ Local-first orchestration infrastructure for AI browser automation.
 - Orchestrator now executes task requests against a ready node, not just queuing.
 - `node-agent` exposes `POST /v1/execute` and runs CDP actions:
   - open URL
+  - deterministic action primitives: `wait_for`, `click`, `type`, `wait`
   - wait render delay
   - capture screenshot
   - extract page title + final URL
@@ -75,7 +76,24 @@ curl -sS -X POST http://localhost:8080/v1/tasks \\
   -d '{"session_id":"sess_000001","url":"https://example.com","goal":"open page and capture screenshot"}'
 ```
 
-6. Run tests:
+6. Execute a deterministic action flow:
+```bash
+curl -sS -X POST http://localhost:8080/v1/tasks \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    "session_id":"sess_000001",
+    "url":"https://duckduckgo.com",
+    "goal":"search for browser use",
+    "actions":[
+      {"type":"wait_for","selector":"input[name=\"q\"]","timeout_ms":8000},
+      {"type":"type","selector":"input[name=\"q\"]","text":"browser use"},
+      {"type":"click","selector":"button[type=\"submit\"]"},
+      {"type":"wait","delay_ms":1200}
+    ]
+  }'
+```
+
+7. Run tests:
 ```bash
 make test
 ```

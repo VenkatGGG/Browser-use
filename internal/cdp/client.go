@@ -3,6 +3,7 @@ package cdp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -38,6 +39,11 @@ type responseError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
+
+const (
+	defaultSelectorTimeout = 12 * time.Second
+	pollInterval           = 150 * time.Millisecond
+)
 
 func Dial(ctx context.Context, baseURL string) (*Client, error) {
 	trimmed := strings.TrimSpace(baseURL)
@@ -82,6 +88,7 @@ func Dial(ctx context.Context, baseURL string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial cdp websocket: %w", err)
 	}
+	conn.SetReadLimit(16 << 20)
 
 	return &Client{conn: conn}, nil
 }
@@ -111,8 +118,19 @@ func (c *Client) CaptureScreenshot(ctx context.Context) (string, error) {
 }
 
 func (c *Client) EvaluateString(ctx context.Context, expression string) (string, error) {
-	if err := c.Call(ctx, "Runtime.enable", nil, nil); err != nil {
+	value, err := c.EvaluateAny(ctx, expression)
+	if err != nil {
 		return "", err
+	}
+	if value == nil {
+		return "", nil
+	}
+	return fmt.Sprint(value), nil
+}
+
+func (c *Client) EvaluateAny(ctx context.Context, expression string) (any, error) {
+	if err := c.Call(ctx, "Runtime.enable", nil, nil); err != nil {
+		return nil, err
 	}
 	var response struct {
 		Result struct {
@@ -123,12 +141,91 @@ func (c *Client) EvaluateString(ctx context.Context, expression string) (string,
 		"expression":    expression,
 		"returnByValue": true,
 	}, &response); err != nil {
-		return "", err
+		return nil, err
 	}
-	if response.Result.Value == nil {
-		return "", nil
+	return response.Result.Value, nil
+}
+
+func (c *Client) WaitForSelector(ctx context.Context, selector string, timeout time.Duration) error {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return errors.New("selector is required")
 	}
-	return fmt.Sprint(response.Result.Value), nil
+	if timeout <= 0 {
+		timeout = defaultSelectorTimeout
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	expression := fmt.Sprintf(`(() => !!document.querySelector(%q))()`, selector)
+	for {
+		value, err := c.EvaluateAny(waitCtx, expression)
+		if err != nil {
+			return err
+		}
+		if found, ok := value.(bool); ok && found {
+			return nil
+		}
+
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("timeout waiting for selector %q", selector)
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+func (c *Client) ClickSelector(ctx context.Context, selector string) error {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return errors.New("selector is required")
+	}
+
+	expression := fmt.Sprintf(`(() => {
+const el = document.querySelector(%q);
+if (!el) return "not_found";
+el.scrollIntoView({block:"center", inline:"center"});
+el.click();
+return "ok";
+})()`, selector)
+
+	result, err := c.EvaluateString(ctx, expression)
+	if err != nil {
+		return err
+	}
+	if result != "ok" {
+		return fmt.Errorf("click failed: %s", result)
+	}
+	return nil
+}
+
+func (c *Client) TypeIntoSelector(ctx context.Context, selector, text string) error {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return errors.New("selector is required")
+	}
+
+	expression := fmt.Sprintf(`(() => {
+const el = document.querySelector(%q);
+if (!el) return "not_found";
+el.scrollIntoView({block:"center", inline:"center"});
+el.focus();
+if (!("value" in el)) return "not_input";
+el.value = %q;
+el.dispatchEvent(new Event("input", {bubbles: true}));
+el.dispatchEvent(new Event("change", {bubbles: true}));
+return "ok";
+})()`, selector, text)
+
+	result, err := c.EvaluateString(ctx, expression)
+	if err != nil {
+		return err
+	}
+	if result != "ok" {
+		return fmt.Errorf("type failed: %s", result)
+	}
+	return nil
 }
 
 func (c *Client) Call(ctx context.Context, method string, params any, out any) error {

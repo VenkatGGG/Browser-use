@@ -11,10 +11,19 @@ import (
 	"time"
 )
 
+type Action struct {
+	Type      string `json:"type"`
+	Selector  string `json:"selector,omitempty"`
+	Text      string `json:"text,omitempty"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
+	DelayMS   int    `json:"delay_ms,omitempty"`
+}
+
 type ExecuteInput struct {
-	TaskID string `json:"task_id"`
-	URL    string `json:"url"`
-	Goal   string `json:"goal"`
+	TaskID  string   `json:"task_id"`
+	URL     string   `json:"url"`
+	Goal    string   `json:"goal"`
+	Actions []Action `json:"actions,omitempty"`
 }
 
 type ExecuteOutput struct {

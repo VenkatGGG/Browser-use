@@ -18,11 +18,20 @@ const (
 	StatusFailed    Status = "failed"
 )
 
+type Action struct {
+	Type      string `json:"type"`
+	Selector  string `json:"selector,omitempty"`
+	Text      string `json:"text,omitempty"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
+	DelayMS   int    `json:"delay_ms,omitempty"`
+}
+
 type Task struct {
 	ID               string     `json:"id"`
 	SessionID        string     `json:"session_id"`
 	URL              string     `json:"url"`
 	Goal             string     `json:"goal"`
+	Actions          []Action   `json:"actions,omitempty"`
 	Status           Status     `json:"status"`
 	NodeID           string     `json:"node_id,omitempty"`
 	PageTitle        string     `json:"page_title,omitempty"`
@@ -38,6 +47,7 @@ type CreateInput struct {
 	SessionID string
 	URL       string
 	Goal      string
+	Actions   []Action
 }
 
 type StartInput struct {
@@ -90,8 +100,8 @@ func (s *InMemoryService) Create(_ context.Context, input CreateInput) (Task, er
 	if input.URL == "" {
 		return Task{}, errors.New("url is required")
 	}
-	if input.Goal == "" {
-		return Task{}, errors.New("goal is required")
+	if input.Goal == "" && len(input.Actions) == 0 {
+		return Task{}, errors.New("goal is required when actions are empty")
 	}
 	id := fmt.Sprintf("task_%06d", s.counter.Add(1))
 	now := time.Now().UTC()
@@ -100,6 +110,7 @@ func (s *InMemoryService) Create(_ context.Context, input CreateInput) (Task, er
 		SessionID: input.SessionID,
 		URL:       input.URL,
 		Goal:      input.Goal,
+		Actions:   append([]Action(nil), input.Actions...),
 		Status:    StatusQueued,
 		CreatedAt: now,
 	}
