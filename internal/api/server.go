@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"net/http"
+	"time"
 
+	"github.com/VenkatGGG/Browser-use/internal/idempotency"
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/session"
 	"github.com/VenkatGGG/Browser-use/internal/task"
@@ -22,6 +24,9 @@ type Server struct {
 	defaultMaxRetries int
 	artifactPath      string
 	artifactHandler   http.Handler
+	idempotency       idempotency.Store
+	idempotencyTTL    time.Duration
+	idempotencyLock   time.Duration
 }
 
 func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry, dispatcher TaskDispatcher, defaultMaxRetries int, artifactPath string, artifactHandler http.Handler) *Server {
@@ -36,6 +41,21 @@ func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry
 		defaultMaxRetries: defaultMaxRetries,
 		artifactPath:      artifactPath,
 		artifactHandler:   artifactHandler,
+		idempotency:       idempotency.NewInMemoryStore(),
+		idempotencyTTL:    24 * time.Hour,
+		idempotencyLock:   30 * time.Second,
+	}
+}
+
+func (s *Server) SetIdempotencyStore(store idempotency.Store, ttl, lockTTL time.Duration) {
+	if store != nil {
+		s.idempotency = store
+	}
+	if ttl > 0 {
+		s.idempotencyTTL = ttl
+	}
+	if lockTTL > 0 {
+		s.idempotencyLock = lockTTL
 	}
 }
 

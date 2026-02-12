@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -140,6 +141,15 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createAndQueueTask(w http.ResponseWriter, r *http.Request) {
+	if s.handleIdempotentRequest(w, r, "tasks:create", func(resp http.ResponseWriter) {
+		s.createAndQueueTaskNonIdempotent(resp, r)
+	}) {
+		return
+	}
+	s.createAndQueueTaskNonIdempotent(w, r)
+}
+
+func (s *Server) createAndQueueTaskNonIdempotent(w http.ResponseWriter, r *http.Request) {
 	var req createTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_json", "request body must be valid JSON")
@@ -163,7 +173,7 @@ func (s *Server) createAndQueueTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queued, status, ok := s.enqueueCreatedTask(r, created)
+	queued, status, ok := s.enqueueCreatedTask(r.Context(), created)
 	if !ok {
 		httpx.WriteJSON(w, status, queued)
 		return
@@ -230,7 +240,7 @@ func (s *Server) replayTask(w http.ResponseWriter, r *http.Request, sourceTaskID
 		return
 	}
 
-	queued, status, ok := s.enqueueCreatedTask(r, created)
+	queued, status, ok := s.enqueueCreatedTask(r.Context(), created)
 	if !ok {
 		httpx.WriteJSON(w, status, queued)
 		return
@@ -238,9 +248,9 @@ func (s *Server) replayTask(w http.ResponseWriter, r *http.Request, sourceTaskID
 	httpx.WriteJSON(w, http.StatusAccepted, queued)
 }
 
-func (s *Server) enqueueCreatedTask(r *http.Request, created task.Task) (task.Task, int, bool) {
+func (s *Server) enqueueCreatedTask(ctx context.Context, created task.Task) (task.Task, int, bool) {
 	if s.dispatcher == nil {
-		failed, _ := s.tasks.Fail(r.Context(), task.FailInput{
+		failed, _ := s.tasks.Fail(ctx, task.FailInput{
 			TaskID:    created.ID,
 			Completed: time.Now().UTC(),
 			Error:     "task dispatcher is not configured",
@@ -248,8 +258,8 @@ func (s *Server) enqueueCreatedTask(r *http.Request, created task.Task) (task.Ta
 		return failed, http.StatusInternalServerError, false
 	}
 
-	if err := s.dispatcher.Enqueue(r.Context(), created.ID); err != nil {
-		failed, _ := s.tasks.Fail(r.Context(), task.FailInput{
+	if err := s.dispatcher.Enqueue(ctx, created.ID); err != nil {
+		failed, _ := s.tasks.Fail(ctx, task.FailInput{
 			TaskID:    created.ID,
 			Completed: time.Now().UTC(),
 			Error:     err.Error(),

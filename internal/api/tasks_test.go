@@ -112,6 +112,57 @@ func TestCreateTaskLegacyAliasQueued(t *testing.T) {
 	}
 }
 
+func TestCreateTaskIdempotencyKeyReturnsSameTaskAndSingleDispatch(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	body1 := []byte(`{"session_id":"sess_1","url":"https://example.com","goal":"open"}`)
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body1))
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("Idempotency-Key", "task-key-1")
+	rr1 := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusAccepted {
+		t.Fatalf("expected first task status 202, got %d body=%s", rr1.Code, rr1.Body.String())
+	}
+
+	body2 := []byte(`{"session_id":"sess_1","url":"https://example.com","goal":"open changed"}`)
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Idempotency-Key", "task-key-1")
+	rr2 := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusAccepted {
+		t.Fatalf("expected second task status 202, got %d body=%s", rr2.Code, rr2.Body.String())
+	}
+
+	var first task.Task
+	var second task.Task
+	if err := json.Unmarshal(rr1.Body.Bytes(), &first); err != nil {
+		t.Fatalf("decode first task: %v", err)
+	}
+	if err := json.Unmarshal(rr2.Body.Bytes(), &second); err != nil {
+		t.Fatalf("decode second task: %v", err)
+	}
+	if first.ID == "" || second.ID == "" {
+		t.Fatalf("expected non-empty task ids")
+	}
+	if first.ID != second.ID {
+		t.Fatalf("expected same task id for idempotent requests, got %s and %s", first.ID, second.ID)
+	}
+	if len(dispatcher.taskIDs) != 1 {
+		t.Fatalf("expected single dispatch, got %d", len(dispatcher.taskIDs))
+	}
+}
+
 func TestCreateTaskQueueFullMarksFailed(t *testing.T) {
 	dispatcher := &recordingDispatcher{err: taskrunner.ErrQueueFull}
 	svc := task.NewInMemoryService()

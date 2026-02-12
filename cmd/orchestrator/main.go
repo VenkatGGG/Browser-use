@@ -12,11 +12,14 @@ import (
 	"github.com/VenkatGGG/Browser-use/internal/api"
 	"github.com/VenkatGGG/Browser-use/internal/artifact"
 	"github.com/VenkatGGG/Browser-use/internal/config"
+	"github.com/VenkatGGG/Browser-use/internal/idempotency"
+	"github.com/VenkatGGG/Browser-use/internal/lease"
 	"github.com/VenkatGGG/Browser-use/internal/nodeclient"
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/session"
 	"github.com/VenkatGGG/Browser-use/internal/task"
 	"github.com/VenkatGGG/Browser-use/internal/taskrunner"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -45,6 +48,27 @@ func main() {
 	defer taskSvc.Close()
 	nodeRegistry := pool.NewInMemoryRegistry()
 	executor := nodeclient.NewGRPCClient(cfg.NodeExecuteTimeout)
+	leaseManager := lease.Manager(lease.NewInMemoryManager())
+	idemStore := idempotency.Store(idempotency.NewInMemoryStore())
+	var redisClient *redis.Client
+
+	if cfg.RedisAddr != "" {
+		redisClient = redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+		pingCtx, pingCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := redisClient.Ping(pingCtx).Err()
+		pingCancel()
+		if err != nil {
+			log.Printf("redis unavailable, falling back to in-memory lease/idempotency: %v", err)
+			_ = redisClient.Close()
+			redisClient = nil
+		} else {
+			leaseManager = lease.NewRedisManager(redisClient, "browseruse:lease")
+			idemStore = idempotency.NewRedisStore(redisClient, "browseruse:idempotency")
+		}
+	}
+	if redisClient != nil {
+		defer redisClient.Close()
+	}
 
 	if cfg.PoolEnabled && cfg.PoolTargetReady > 0 {
 		provider, err := pool.NewLocalDockerProvider(pool.LocalDockerProviderConfig{
@@ -103,6 +127,8 @@ func main() {
 		RetryBaseDelay:      cfg.TaskRetryBaseDelay,
 		RetryMaxDelay:       cfg.TaskRetryMaxDelay,
 		DomainBlockCooldown: cfg.TaskDomainBlockCooldown,
+		LeaseTTL:            cfg.NodeLeaseTTL,
+		Leaser:              leaseManager,
 	}, log.Default())
 	runner.Start(ctx)
 
@@ -115,6 +141,7 @@ func main() {
 		cfg.ArtifactBaseURL,
 		artifactHandler,
 	)
+	server.SetIdempotencyStore(idemStore, cfg.IdempotencyTTL, cfg.IdempotencyLockTTL)
 
 	httpServer := &http.Server{
 		Addr:         cfg.HTTPAddr,

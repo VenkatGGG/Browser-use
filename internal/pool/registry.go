@@ -19,9 +19,10 @@ type RegisterInput struct {
 }
 
 type HeartbeatInput struct {
-	NodeID string
-	State  NodeState
-	At     time.Time
+	NodeID      string
+	State       NodeState
+	At          time.Time
+	LeasedUntil time.Time
 }
 
 type Registry interface {
@@ -73,6 +74,7 @@ func (r *InMemoryRegistry) Register(_ context.Context, input RegisterInput) (Nod
 	existing.BootedAt = bootedAt
 	existing.State = NodeStateReady
 	existing.LastHeartbeat = now
+	existing.LeasedUntil = time.Time{}
 	existing.UpdatedAt = now
 	r.nodes[nodeID] = existing
 
@@ -105,6 +107,11 @@ func (r *InMemoryRegistry) Heartbeat(_ context.Context, input HeartbeatInput) (N
 
 	existing.State = state
 	existing.LastHeartbeat = at
+	if state == NodeStateLeased && !input.LeasedUntil.IsZero() {
+		existing.LeasedUntil = input.LeasedUntil.UTC()
+	} else if state != NodeStateLeased {
+		existing.LeasedUntil = time.Time{}
+	}
 	existing.UpdatedAt = at
 	r.nodes[nodeID] = existing
 

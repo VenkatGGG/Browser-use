@@ -11,7 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/VenkatGGG/Browser-use/internal/artifact"
+	"github.com/VenkatGGG/Browser-use/internal/lease"
 	"github.com/VenkatGGG/Browser-use/internal/nodeclient"
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/task"
@@ -27,6 +30,9 @@ type Config struct {
 	RetryBaseDelay      time.Duration
 	RetryMaxDelay       time.Duration
 	DomainBlockCooldown time.Duration
+	LeaseTTL            time.Duration
+	Leaser              lease.Manager
+	RunnerInstanceID    string
 }
 
 type Runner struct {
@@ -40,8 +46,9 @@ type Runner struct {
 	queue    chan string
 	enqueued map[string]struct{}
 	enqueueM sync.Mutex
-	lease    map[string]struct{}
-	leaseM   sync.Mutex
+	leaser   lease.Manager
+	leaseTTL time.Duration
+	ownerID  string
 
 	blockedDomains map[string]time.Time
 	blockedM       sync.Mutex
@@ -75,6 +82,16 @@ func New(tasks task.Service, nodes pool.Registry, executor nodeclient.Client, ar
 	if cfg.DomainBlockCooldown <= 0 {
 		cfg.DomainBlockCooldown = 3 * time.Minute
 	}
+	if cfg.LeaseTTL <= 0 {
+		cfg.LeaseTTL = 90 * time.Second
+	}
+	if cfg.Leaser == nil {
+		cfg.Leaser = lease.NewInMemoryManager()
+	}
+	ownerID := strings.TrimSpace(cfg.RunnerInstanceID)
+	if ownerID == "" {
+		ownerID = "runner-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	}
 
 	return &Runner{
 		tasks:          tasks,
@@ -85,7 +102,9 @@ func New(tasks task.Service, nodes pool.Registry, executor nodeclient.Client, ar
 		logger:         logger,
 		queue:          make(chan string, cfg.QueueSize),
 		enqueued:       make(map[string]struct{}),
-		lease:          make(map[string]struct{}),
+		leaser:         cfg.Leaser,
+		leaseTTL:       cfg.LeaseTTL,
+		ownerID:        ownerID,
 		blockedDomains: make(map[string]time.Time),
 	}
 }
@@ -171,21 +190,21 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		return
 	}
 
-	node, err := r.acquireNode(ctx)
+	nodeLease, err := r.acquireNode(ctx)
 	if err != nil {
 		r.handleExecutionFailure(ctx, startedTask, "", fmt.Errorf("no node available: %w", err))
 		return
 	}
-	defer r.releaseNode(ctx, node)
+	defer r.releaseNode(ctx, nodeLease)
 
-	result, err := r.executor.Execute(ctx, node.Address, nodeclient.ExecuteInput{
+	result, err := r.executor.Execute(ctx, nodeLease.Node.Address, nodeclient.ExecuteInput{
 		TaskID:  startedTask.ID,
 		URL:     startedTask.URL,
 		Goal:    startedTask.Goal,
 		Actions: mapNodeActions(startedTask.Actions),
 	})
 	if err != nil {
-		r.handleExecutionFailure(ctx, startedTask, node.ID, fmt.Errorf("node execution failed: %w", err))
+		r.handleExecutionFailure(ctx, startedTask, nodeLease.Node.ID, fmt.Errorf("node execution failed: %w", err))
 		return
 	}
 
@@ -196,7 +215,7 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 			blockerMessage = "blocking challenge detected"
 		}
 		r.markDomainBlocked(firstNonEmpty(result.FinalURL, startedTask.URL), result.BlockerType, time.Now().UTC())
-		r.failTaskWithEvidence(ctx, startedTask.ID, node.ID, fmt.Errorf("blocked (%s): %s", result.BlockerType, blockerMessage), failureEvidence{
+		r.failTaskWithEvidence(ctx, startedTask.ID, nodeLease.Node.ID, fmt.Errorf("blocked (%s): %s", result.BlockerType, blockerMessage), failureEvidence{
 			PageTitle:             result.PageTitle,
 			FinalURL:              result.FinalURL,
 			ScreenshotBase64:      screenshotBase64,
@@ -209,14 +228,14 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 
 	if _, err := r.tasks.Complete(ctx, task.CompleteInput{
 		TaskID:                startedTask.ID,
-		NodeID:                node.ID,
+		NodeID:                nodeLease.Node.ID,
 		Completed:             time.Now().UTC(),
 		PageTitle:             result.PageTitle,
 		FinalURL:              result.FinalURL,
 		ScreenshotBase64:      screenshotBase64,
 		ScreenshotArtifactURL: screenshotArtifactURL,
 	}); err != nil {
-		r.failTask(ctx, startedTask.ID, node.ID, fmt.Errorf("failed to complete task: %w", err))
+		r.failTask(ctx, startedTask.ID, nodeLease.Node.ID, fmt.Errorf("failed to complete task: %w", err))
 		return
 	}
 }
@@ -395,14 +414,20 @@ func (r *Runner) enqueueAfterDelay(ctx context.Context, taskID string, delay tim
 	r.failTask(context.Background(), taskID, "", errors.New("re-enqueue failed: queue remained full"))
 }
 
-func (r *Runner) acquireNode(ctx context.Context) (pool.Node, error) {
+type leasedNode struct {
+	Node      pool.Node
+	Token     uint64
+	ExpiresAt time.Time
+}
+
+func (r *Runner) acquireNode(ctx context.Context) (leasedNode, error) {
 	waitCtx, cancel := context.WithTimeout(ctx, r.cfg.NodeWaitTimeout)
 	defer cancel()
 
 	for {
 		node, ok, err := r.tryAcquireReadyNode(waitCtx)
 		if err != nil {
-			return pool.Node{}, err
+			return leasedNode{}, err
 		}
 		if ok {
 			return node, nil
@@ -410,46 +435,53 @@ func (r *Runner) acquireNode(ctx context.Context) (pool.Node, error) {
 
 		select {
 		case <-waitCtx.Done():
-			return pool.Node{}, waitCtx.Err()
+			return leasedNode{}, waitCtx.Err()
 		case <-time.After(r.cfg.PollInterval):
 		}
 	}
 }
 
-func (r *Runner) tryAcquireReadyNode(ctx context.Context) (pool.Node, bool, error) {
+func (r *Runner) tryAcquireReadyNode(ctx context.Context) (leasedNode, bool, error) {
 	nodes, err := r.nodes.List(ctx)
 	if err != nil {
-		return pool.Node{}, false, err
+		return leasedNode{}, false, err
 	}
-
-	r.leaseM.Lock()
-	defer r.leaseM.Unlock()
 
 	for _, node := range nodes {
 		if node.State != pool.NodeStateReady {
 			continue
 		}
-		if _, busy := r.lease[node.ID]; busy {
+
+		resource := "node:" + strings.TrimSpace(node.ID)
+		acquired, ok, err := r.leaser.Acquire(ctx, resource, r.ownerID, r.leaseTTL)
+		if err != nil {
+			return leasedNode{}, false, err
+		}
+		if !ok {
 			continue
 		}
-		r.lease[node.ID] = struct{}{}
+
 		_, _ = r.nodes.Heartbeat(context.Background(), pool.HeartbeatInput{
-			NodeID: node.ID,
-			State:  pool.NodeStateLeased,
-			At:     time.Now().UTC(),
+			NodeID:      node.ID,
+			State:       pool.NodeStateLeased,
+			At:          time.Now().UTC(),
+			LeasedUntil: acquired.ExpiresAt,
 		})
-		return node, true, nil
+		return leasedNode{
+			Node:      node,
+			Token:     acquired.Token,
+			ExpiresAt: acquired.ExpiresAt,
+		}, true, nil
 	}
-	return pool.Node{}, false, nil
+	return leasedNode{}, false, nil
 }
 
-func (r *Runner) releaseNode(ctx context.Context, node pool.Node) {
-	r.leaseM.Lock()
-	delete(r.lease, node.ID)
-	r.leaseM.Unlock()
+func (r *Runner) releaseNode(ctx context.Context, node leasedNode) {
+	resource := "node:" + strings.TrimSpace(node.Node.ID)
+	_ = r.leaser.Release(context.Background(), resource, r.ownerID, node.Token)
 
 	_, _ = r.nodes.Heartbeat(ctx, pool.HeartbeatInput{
-		NodeID: node.ID,
+		NodeID: node.Node.ID,
 		State:  pool.NodeStateReady,
 		At:     time.Now().UTC(),
 	})

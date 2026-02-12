@@ -16,20 +16,29 @@ type createSessionRequest struct {
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
-		var req createSessionRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "invalid_json", "request body must be valid JSON")
+		if s.handleIdempotentRequest(w, r, "sessions:create", func(resp http.ResponseWriter) {
+			s.createSession(resp, r)
+		}) {
 			return
 		}
-		created, err := s.sessions.Create(r.Context(), session.CreateInput{TenantID: strings.TrimSpace(req.TenantID)})
-		if err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "create_failed", err.Error())
-			return
-		}
-		httpx.WriteJSON(w, http.StatusCreated, created)
+		s.createSession(w, r)
 	default:
 		httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	}
+}
+
+func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
+	var req createSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid_json", "request body must be valid JSON")
+		return
+	}
+	created, err := s.sessions.Create(r.Context(), session.CreateInput{TenantID: strings.TrimSpace(req.TenantID)})
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "create_failed", err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, created)
 }
 
 func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {

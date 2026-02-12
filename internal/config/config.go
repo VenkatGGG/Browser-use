@@ -22,6 +22,9 @@ type Config struct {
 	TaskRetryBaseDelay      time.Duration
 	TaskRetryMaxDelay       time.Duration
 	TaskDomainBlockCooldown time.Duration
+	NodeLeaseTTL            time.Duration
+	IdempotencyTTL          time.Duration
+	IdempotencyLockTTL      time.Duration
 	ArtifactDir             string
 	ArtifactBaseURL         string
 	RedisAddr               string
@@ -60,6 +63,9 @@ func Load() Config {
 		TaskRetryBaseDelay:      durationOrDefault("ORCHESTRATOR_TASK_RETRY_BASE_DELAY", 1*time.Second),
 		TaskRetryMaxDelay:       durationOrDefault("ORCHESTRATOR_TASK_RETRY_MAX_DELAY", 20*time.Second),
 		TaskDomainBlockCooldown: durationOrDefault("ORCHESTRATOR_TASK_DOMAIN_BLOCK_COOLDOWN", 3*time.Minute),
+		NodeLeaseTTL:            durationOrDefault("ORCHESTRATOR_NODE_LEASE_TTL", 90*time.Second),
+		IdempotencyTTL:          durationOrDefault("ORCHESTRATOR_IDEMPOTENCY_TTL", 24*time.Hour),
+		IdempotencyLockTTL:      durationOrDefault("ORCHESTRATOR_IDEMPOTENCY_LOCK_TTL", 30*time.Second),
 		ArtifactDir:             artifact.RootDirFromEnv(os.Getenv("ORCHESTRATOR_ARTIFACTS_DIR")),
 		ArtifactBaseURL:         normalizeArtifactBaseURL(os.Getenv("ORCHESTRATOR_ARTIFACT_BASE_URL")),
 		RedisAddr:               envOrDefault("REDIS_ADDR", "redis:6379"),
