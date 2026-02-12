@@ -215,7 +215,7 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 				ScreenshotArtifactURL: screenshotArtifactURL,
 				BlockerType:           execErr.Output.BlockerType,
 				BlockerMessage:        execErr.Output.BlockerMessage,
-				Trace:                 mapTaskTrace(execErr.Output.Trace),
+				Trace:                 r.mapTaskTraceWithArtifacts(ctx, startedTask.ID, execErr.Output.Trace),
 			}
 		}
 		r.handleExecutionFailureWithEvidence(ctx, startedTask, nodeLease.Node.ID, fmt.Errorf("node execution failed: %w", err), evidence)
@@ -236,7 +236,7 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 			ScreenshotArtifactURL: screenshotArtifactURL,
 			BlockerType:           result.BlockerType,
 			BlockerMessage:        blockerMessage,
-			Trace:                 mapTaskTrace(result.Trace),
+			Trace:                 r.mapTaskTraceWithArtifacts(ctx, startedTask.ID, result.Trace),
 		})
 		return
 	}
@@ -249,7 +249,7 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		FinalURL:              result.FinalURL,
 		ScreenshotBase64:      screenshotBase64,
 		ScreenshotArtifactURL: screenshotArtifactURL,
-		Trace:                 mapTaskTrace(result.Trace),
+		Trace:                 r.mapTaskTraceWithArtifacts(ctx, startedTask.ID, result.Trace),
 	}); err != nil {
 		r.failTask(ctx, startedTask.ID, nodeLease.Node.ID, fmt.Errorf("failed to complete task: %w", err))
 		return
@@ -582,9 +582,22 @@ func mapNodeActions(actions []task.Action) []nodeclient.Action {
 	return mapped
 }
 
-func mapTaskTrace(trace []nodeclient.StepTrace) []task.StepTrace {
+func (r *Runner) mapTaskTraceWithArtifacts(ctx context.Context, taskID string, trace []nodeclient.StepTrace) []task.StepTrace {
 	mapped := make([]task.StepTrace, 0, len(trace))
 	for _, step := range trace {
+		screenshotBase64 := strings.TrimSpace(step.ScreenshotBase64)
+		screenshotArtifactURL := strings.TrimSpace(step.ScreenshotArtifactURL)
+		if r.artifacts != nil && screenshotBase64 != "" && screenshotArtifactURL == "" {
+			artifactTaskID := fmt.Sprintf("%s-step-%03d", strings.TrimSpace(taskID), maxInt(step.Index, len(mapped)+1))
+			url, saveErr := r.artifacts.SaveScreenshotBase64(ctx, artifactTaskID, screenshotBase64)
+			if saveErr != nil {
+				r.logger.Printf("task %s trace step %d artifact save failed (falling back to inline screenshot): %v", taskID, step.Index, saveErr)
+			} else {
+				screenshotArtifactURL = url
+				screenshotBase64 = ""
+			}
+		}
+
 		mapped = append(mapped, task.StepTrace{
 			Index: step.Index,
 			Action: task.Action{
@@ -595,11 +608,13 @@ func mapTaskTrace(trace []nodeclient.StepTrace) []task.StepTrace {
 				TimeoutMS: step.Action.TimeoutMS,
 				DelayMS:   step.Action.DelayMS,
 			},
-			Status:      step.Status,
-			Error:       step.Error,
-			StartedAt:   utcTimePtr(step.StartedAt),
-			CompletedAt: utcTimePtr(step.CompletedAt),
-			DurationMS:  step.DurationMS,
+			Status:                step.Status,
+			Error:                 step.Error,
+			StartedAt:             utcTimePtr(step.StartedAt),
+			CompletedAt:           utcTimePtr(step.CompletedAt),
+			DurationMS:            step.DurationMS,
+			ScreenshotBase64:      screenshotBase64,
+			ScreenshotArtifactURL: screenshotArtifactURL,
 		})
 	}
 	return mapped
@@ -611,6 +626,13 @@ func utcTimePtr(value time.Time) *time.Time {
 	}
 	t := value.UTC()
 	return &t
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (r *Runner) isDomainBlocked(rawURL string, now time.Time) (bool, string, time.Time) {

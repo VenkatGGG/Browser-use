@@ -5,11 +5,14 @@ import (
 	"errors"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/VenkatGGG/Browser-use/internal/artifact"
 	"github.com/VenkatGGG/Browser-use/internal/nodeclient"
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/task"
@@ -89,9 +92,10 @@ func (e *traceErrorExecutor) Execute(_ context.Context, _ string, input nodeclie
 					Type:     "click",
 					Selector: "button.buy",
 				},
-				Status:     "failed",
-				Error:      "click failed: not_found",
-				DurationMS: 300,
+				Status:           "failed",
+				Error:            "click failed: not_found",
+				DurationMS:       300,
+				ScreenshotBase64: "c3RlcC1zaG90",
 			},
 		},
 	}
@@ -455,6 +459,76 @@ func TestRunnerPersistsTraceFromExecutionErrorMetadata(t *testing.T) {
 	}
 	if failed.Trace[1].Action.Type != "click" {
 		t.Fatalf("expected second trace action click, got %q", failed.Trace[1].Action.Type)
+	}
+	if failed.Trace[1].ScreenshotBase64 == "" {
+		t.Fatalf("expected step screenshot inline data when artifact store is not configured")
+	}
+}
+
+func TestRunnerPersistsTraceScreenshotArtifactsWhenStoreConfigured(t *testing.T) {
+	taskSvc := task.NewInMemoryService()
+	nodes := pool.NewInMemoryRegistry()
+	_, err := nodes.Register(context.Background(), pool.RegisterInput{NodeID: "node-1", Address: "node-1:8091", Version: "dev"})
+	if err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+
+	tempDir := t.TempDir()
+	store, err := artifact.NewLocalStore(tempDir, "/artifacts")
+	if err != nil {
+		t.Fatalf("new local artifact store: %v", err)
+	}
+
+	exec := &traceErrorExecutor{}
+	runner := New(taskSvc, nodes, exec, store, Config{
+		QueueSize:       8,
+		Workers:         1,
+		NodeWaitTimeout: 1 * time.Second,
+		PollInterval:    30 * time.Millisecond,
+		RetryBaseDelay:  20 * time.Millisecond,
+		RetryMaxDelay:   100 * time.Millisecond,
+	}, log.New(io.Discard, "", 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Start(ctx)
+
+	created, err := taskSvc.Create(ctx, task.CreateInput{
+		SessionID:  "sess_1",
+		URL:        "https://example.com",
+		Goal:       "buy",
+		MaxRetries: 2,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := runner.Enqueue(ctx, created.ID); err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+
+	failed := waitForTerminalTask(t, ctx, taskSvc, created.ID, 4*time.Second)
+	if failed.Status != task.StatusFailed {
+		t.Fatalf("expected failed status, got %s", failed.Status)
+	}
+	if len(failed.Trace) != 2 {
+		t.Fatalf("expected persisted trace with 2 steps, got %d", len(failed.Trace))
+	}
+
+	step := failed.Trace[1]
+	if step.ScreenshotArtifactURL == "" {
+		t.Fatalf("expected trace screenshot artifact url to be populated")
+	}
+	if step.ScreenshotBase64 != "" {
+		t.Fatalf("expected inline trace screenshot to be cleared after artifact save")
+	}
+
+	entries, err := os.ReadDir(filepath.Join(tempDir, "screenshots"))
+	if err != nil {
+		t.Fatalf("read artifact screenshots dir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatalf("expected screenshot artifacts to be written")
 	}
 }
 

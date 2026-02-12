@@ -32,6 +32,7 @@ type LocalDockerProviderConfig struct {
 	PlannerModel       string
 	PlannerTimeout     time.Duration
 	PlannerMaxElements int
+	TraceScreenshots   bool
 	XVFBScreenGeometry string
 	ChromeDebugPort    int
 	DefaultMemoryLimit string
@@ -130,6 +131,7 @@ func (p *LocalDockerProvider) ProvisionNode(ctx context.Context, input Provision
 		"NODE_AGENT_PLANNER_MODE":         p.cfg.PlannerMode,
 		"NODE_AGENT_PLANNER_TIMEOUT":      p.cfg.PlannerTimeout.String(),
 		"NODE_AGENT_PLANNER_MAX_ELEMENTS": fmt.Sprintf("%d", p.cfg.PlannerMaxElements),
+		"NODE_AGENT_TRACE_SCREENSHOTS":    fmt.Sprintf("%t", p.cfg.TraceScreenshots),
 		"CHROME_DEBUG_PORT":               fmt.Sprintf("%d", p.cfg.ChromeDebugPort),
 		"XVFB_SCREEN_GEOMETRY":            p.cfg.XVFBScreenGeometry,
 	}

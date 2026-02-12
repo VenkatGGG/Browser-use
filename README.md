@@ -109,6 +109,7 @@ Local-first orchestration infrastructure for AI browser automation.
     - `NODE_AGENT_PLANNER_MAX_ELEMENTS`
 - Endpoint planner has safe fallback to deterministic heuristic planning on endpoint failures/invalid output.
 - Task records now persist execution trace steps (`trace`) including action payload, step status, timing, and failure reason when available.
+- Optional trace step screenshots can be enabled with `NODE_AGENT_TRACE_SCREENSHOTS=true` (or `ORCHESTRATOR_POOL_NODE_TRACE_SCREENSHOTS=true` for managed warm-pool nodes).
 
 ### Phase 4 started (dashboard)
 - Orchestrator now serves a live dashboard at `GET /dashboard`.

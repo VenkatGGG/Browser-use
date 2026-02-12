@@ -91,6 +91,7 @@ func main() {
 			PlannerModel:       cfg.PoolNodePlannerModel,
 			PlannerTimeout:     cfg.PoolNodePlannerTimeout,
 			PlannerMaxElements: cfg.PoolNodePlannerMaxElements,
+			TraceScreenshots:   cfg.PoolNodeTraceScreenshots,
 			XVFBScreenGeometry: cfg.PoolXVFBScreenGeometry,
 			ChromeDebugPort:    cfg.PoolChromeDebugPort,
 		})

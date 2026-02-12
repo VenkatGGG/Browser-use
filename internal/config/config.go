@@ -50,6 +50,7 @@ type Config struct {
 	PoolNodePlannerModel       string
 	PoolNodePlannerTimeout     time.Duration
 	PoolNodePlannerMaxElements int
+	PoolNodeTraceScreenshots   bool
 	PoolXVFBScreenGeometry     string
 	PoolChromeDebugPort        int
 }
@@ -96,6 +97,7 @@ func Load() Config {
 		PoolNodePlannerModel:       strings.TrimSpace(os.Getenv("ORCHESTRATOR_POOL_NODE_PLANNER_MODEL")),
 		PoolNodePlannerTimeout:     durationOrDefault("ORCHESTRATOR_POOL_NODE_PLANNER_TIMEOUT", 8*time.Second),
 		PoolNodePlannerMaxElements: intOrDefault("ORCHESTRATOR_POOL_NODE_PLANNER_MAX_ELEMENTS", 48),
+		PoolNodeTraceScreenshots:   boolOrDefault("ORCHESTRATOR_POOL_NODE_TRACE_SCREENSHOTS", false),
 		PoolXVFBScreenGeometry:     envOrDefault("ORCHESTRATOR_POOL_XVFB_SCREEN_GEOMETRY", "1280x720x24"),
 		PoolChromeDebugPort:        intOrDefault("ORCHESTRATOR_POOL_CHROME_DEBUG_PORT", 9222),
 	}

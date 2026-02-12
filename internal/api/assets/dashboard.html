@@ -529,6 +529,60 @@
       overflow: auto;
     }
 
+    .trace-list {
+      display: grid;
+      gap: 7px;
+    }
+
+    .trace-step {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      background: #fff;
+    }
+
+    .trace-step.failed {
+      border-color: #e9b5b0;
+      background: #fff6f5;
+    }
+
+    .trace-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+
+    .trace-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .trace-action {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      color: #1f2e34;
+      word-break: break-word;
+    }
+
+    .trace-error {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #b13f39;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .trace-time {
+      margin-top: 4px;
+      font-size: 10px;
+      color: #5f6f77;
+      word-break: break-word;
+    }
+
     .detail-actions {
       display: flex;
       gap: 8px;
@@ -1002,8 +1056,12 @@
       const end = parseTime(task.completed_at);
       if (!start || !end) return "-";
       const ms = end.getTime() - start.getTime();
-      if (ms < 0) return "-";
-      if (ms < 1000) return ms + "ms";
+      return formatDurationMS(ms);
+    }
+
+    function formatDurationMS(ms) {
+      if (!Number.isFinite(ms) || ms < 0) return "-";
+      if (ms < 1000) return Math.round(ms) + "ms";
       if (ms < 60000) return (ms / 1000).toFixed(1) + "s";
       return (ms / 60000).toFixed(1) + "m";
     }
@@ -1061,6 +1119,74 @@
       const text = String(value || "");
       if (text.length <= max) return text;
       return text.slice(0, max - 3) + "...";
+    }
+
+    function actionSummary(action) {
+      if (!action || typeof action !== "object") return "-";
+      const type = String(action.type || "").trim() || "unknown";
+      const selector = String(action.selector || "").trim();
+      const text = String(action.text || "").trim();
+      const pixels = Number.parseInt(action.pixels, 10);
+      if (selector) return type + " " + selector;
+      if (text && type !== "type" && type !== "wait_for_url_contains") return type + " " + compactText(text, 60);
+      if (type === "type" && text) return type + " \"" + compactText(text, 48) + "\"";
+      if (type === "wait_for_url_contains" && text) return type + " \"" + compactText(text, 48) + "\"";
+      if (type === "scroll" && Number.isFinite(pixels) && pixels > 0) return type + " " + pixels + "px";
+      return type;
+    }
+
+    function traceStatusPillClass(status) {
+      const normalized = String(status || "").toLowerCase();
+      if (normalized === "succeeded" || normalized === "success" || normalized === "ok") return "pill-completed";
+      if (normalized === "failed" || normalized === "error") return "pill-failed";
+      if (normalized === "running" || normalized === "in_progress") return "pill-running";
+      return "pill-warming";
+    }
+
+    function renderTrace(trace) {
+      const items = Array.isArray(trace) ? trace : [];
+      if (!items.length) {
+        return '<div class="empty">No step trace recorded for this task.</div>';
+      }
+
+      return (
+        '<div class="trace-list">' +
+          items.map((step, index) => {
+            const status = String(step.status || "unknown").toLowerCase();
+            const startedAt = fmtTime(step.started_at);
+            const completedAt = fmtTime(step.completed_at);
+            const duration = formatDurationMS(Number(step.duration_ms || 0));
+            const action = actionSummary(step.action || {});
+            const error = String(step.error || "").trim();
+            const artifactURL = String(step.screenshot_artifact_url || "").trim();
+            const inlineShot = String(step.screenshot_base64 || "").trim();
+            const screenshotPreviewURL = artifactURL
+              ? artifactURL
+              : (inlineShot ? ("data:image/png;base64," + inlineShot) : "");
+            const idx = Number.parseInt(step.index, 10);
+            const stepLabel = Number.isFinite(idx) && idx > 0 ? "#" + idx : "#" + (index + 1);
+            const failedClass = status === "failed" ? " failed" : "";
+
+            return (
+              '<div class="trace-step' + failedClass + '">' +
+                '<div class="trace-head">' +
+                  '<div class="trace-meta">' +
+                    '<span class="mono">' + escapeHTML(stepLabel) + '</span>' +
+                    '<span class="pill ' + traceStatusPillClass(status) + '">' + escapeHTML(status) + '</span>' +
+                    '<span class="mono">' + escapeHTML(duration) + '</span>' +
+                    (screenshotPreviewURL
+                      ? ('<a class="link mono" href="' + escapeHTML(screenshotPreviewURL) + '" data-artifact="' + escapeHTML(screenshotPreviewURL) + '">shot</a>')
+                      : '') +
+                  '</div>' +
+                '</div>' +
+                '<div class="trace-action">' + escapeHTML(action) + '</div>' +
+                (error ? ('<div class="trace-error">' + escapeHTML(error) + '</div>') : '') +
+                '<div class="trace-time">start: ' + escapeHTML(startedAt) + ' | end: ' + escapeHTML(completedAt) + '</div>' +
+              '</div>'
+            );
+          }).join('') +
+        '</div>'
+      );
     }
 
     function replayChainSummary(chainState) {
@@ -1305,6 +1431,12 @@
       }
 
       const actionsJSON = JSON.stringify(task.actions || [], null, 2);
+      const trace = Array.isArray(task.trace) ? task.trace : [];
+      const traceJSON = JSON.stringify(trace, null, 2);
+      const traceSummary = trace.length
+        ? (trace.length + " step(s), " + trace.filter((item) => String(item.status || "").toLowerCase() === "failed").length + " failed")
+        : "no trace";
+      const traceBlock = renderTrace(trace);
       const artifactButton = task.screenshot_artifact_url
         ? '<button type="button" class="btn btn-secondary" data-artifact="' + escapeHTML(task.screenshot_artifact_url) + '">Preview Artifact</button>'
         : '';
@@ -1342,6 +1474,9 @@
           '<div class="pair"><span class="k">Blocker</span><span class="v">' + escapeHTML((task.blocker_type || '-') + (task.blocker_message ? (': ' + task.blocker_message) : '')) + '</span></div>' +
           '<div class="pair"><span class="k">Error</span><span class="v">' + escapeHTML(task.error_message || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Artifact URL</span><span class="v">' + openArtifactLink + '</span></div>' +
+          '<div class="pair"><span class="k">Trace Summary</span><span class="v mono">' + escapeHTML(traceSummary) + '</span></div>' +
+          '<div class="pair"><span class="k">Execution Trace</span>' + traceBlock + '</div>' +
+          '<div class="pair"><span class="k">Trace JSON</span><pre class="json">' + escapeHTML(traceJSON) + '</pre></div>' +
           '<div class="pair"><span class="k">Actions JSON</span><pre class="json">' + escapeHTML(actionsJSON) + '</pre></div>' +
         '</div>' +
         '<div class="detail-actions">' +

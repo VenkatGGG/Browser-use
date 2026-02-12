@@ -42,6 +42,7 @@ type config struct {
 	PlannerModel       string
 	PlannerTimeout     time.Duration
 	PlannerMaxElements int
+	TraceScreenshots   bool
 }
 
 type registerNodeRequest struct {
@@ -82,13 +83,15 @@ type executeResponse struct {
 }
 
 type executeTraceStep struct {
-	Index       int           `json:"index"`
-	Action      executeAction `json:"action"`
-	Status      string        `json:"status"`
-	Error       string        `json:"error,omitempty"`
-	StartedAt   time.Time     `json:"started_at,omitempty"`
-	CompletedAt time.Time     `json:"completed_at,omitempty"`
-	DurationMS  int64         `json:"duration_ms,omitempty"`
+	Index                 int           `json:"index"`
+	Action                executeAction `json:"action"`
+	Status                string        `json:"status"`
+	Error                 string        `json:"error,omitempty"`
+	StartedAt             time.Time     `json:"started_at,omitempty"`
+	CompletedAt           time.Time     `json:"completed_at,omitempty"`
+	DurationMS            int64         `json:"duration_ms,omitempty"`
+	ScreenshotBase64      string        `json:"screenshot_base64,omitempty"`
+	ScreenshotArtifactURL string        `json:"screenshot_artifact_url,omitempty"`
 }
 
 type executeFlowError struct {
@@ -101,11 +104,12 @@ func (e *executeFlowError) Error() string {
 }
 
 type browserExecutor struct {
-	cdpBaseURL     string
-	renderDelay    time.Duration
-	executeTimeout time.Duration
-	planner        actionPlanner
-	mu             sync.Mutex
+	cdpBaseURL       string
+	renderDelay      time.Duration
+	executeTimeout   time.Duration
+	planner          actionPlanner
+	traceScreenshots bool
+	mu               sync.Mutex
 }
 
 func newBrowserExecutor(cfg config) *browserExecutor {
@@ -121,6 +125,7 @@ func newBrowserExecutor(cfg config) *browserExecutor {
 			Timeout:     cfg.PlannerTimeout,
 			MaxElements: cfg.PlannerMaxElements,
 		}),
+		traceScreenshots: cfg.TraceScreenshots,
 	}
 }
 
@@ -213,6 +218,9 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 			step.Error = err.Error()
 			step.CompletedAt = finished
 			step.DurationMS = finished.Sub(started).Milliseconds()
+			if screenshot, shotErr := client.CaptureScreenshot(runCtx); shotErr == nil {
+				step.ScreenshotBase64 = screenshot
+			}
 			trace = append(trace, step)
 
 			partial := executeResponse{
@@ -226,6 +234,10 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 			}
 			if screenshot, shotErr := client.CaptureScreenshot(runCtx); shotErr == nil {
 				partial.ScreenshotBase64 = screenshot
+				if traceIdx := len(trace) - 1; traceIdx >= 0 && strings.TrimSpace(trace[traceIdx].ScreenshotBase64) == "" {
+					trace[traceIdx].ScreenshotBase64 = screenshot
+					partial.Trace = append([]executeTraceStep(nil), trace...)
+				}
 			}
 			return partial, &executeFlowError{
 				message: fmt.Sprintf("action %d (%s) failed: %v", index+1, action.Type, err),
@@ -235,6 +247,11 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 		finished := time.Now().UTC()
 		step.CompletedAt = finished
 		step.DurationMS = finished.Sub(started).Milliseconds()
+		if e.traceScreenshots {
+			if screenshot, shotErr := client.CaptureScreenshot(runCtx); shotErr == nil {
+				step.ScreenshotBase64 = screenshot
+			}
+		}
 		trace = append(trace, step)
 	}
 
@@ -575,6 +592,7 @@ func loadConfig() config {
 		PlannerModel:       strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_MODEL")),
 		PlannerTimeout:     durationOrDefault("NODE_AGENT_PLANNER_TIMEOUT", 8*time.Second),
 		PlannerMaxElements: intOrDefault("NODE_AGENT_PLANNER_MAX_ELEMENTS", 48),
+		TraceScreenshots:   boolOrDefault("NODE_AGENT_TRACE_SCREENSHOTS", false),
 	}
 }
 
@@ -741,4 +759,19 @@ func intOrDefault(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func boolOrDefault(key string, fallback bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }

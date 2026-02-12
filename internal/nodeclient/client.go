@@ -21,13 +21,15 @@ type Action struct {
 }
 
 type StepTrace struct {
-	Index       int       `json:"index"`
-	Action      Action    `json:"action"`
-	Status      string    `json:"status"`
-	Error       string    `json:"error,omitempty"`
-	StartedAt   time.Time `json:"started_at,omitempty"`
-	CompletedAt time.Time `json:"completed_at,omitempty"`
-	DurationMS  int64     `json:"duration_ms,omitempty"`
+	Index                 int       `json:"index"`
+	Action                Action    `json:"action"`
+	Status                string    `json:"status"`
+	Error                 string    `json:"error,omitempty"`
+	StartedAt             time.Time `json:"started_at,omitempty"`
+	CompletedAt           time.Time `json:"completed_at,omitempty"`
+	DurationMS            int64     `json:"duration_ms,omitempty"`
+	ScreenshotBase64      string    `json:"screenshot_base64,omitempty"`
+	ScreenshotArtifactURL string    `json:"screenshot_artifact_url,omitempty"`
 }
 
 type ExecuteInput struct {
