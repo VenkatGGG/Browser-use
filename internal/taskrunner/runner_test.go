@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/VenkatGGG/Browser-use/internal/artifact"
+	"github.com/VenkatGGG/Browser-use/internal/lease"
 	"github.com/VenkatGGG/Browser-use/internal/nodeclient"
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/task"
@@ -104,6 +105,49 @@ func (e *traceErrorExecutor) Execute(_ context.Context, _ string, input nodeclie
 		Message: "click failed: not_found",
 		Output:  out,
 	}
+}
+
+type concurrencyTrackingExecutor struct {
+	mu            sync.Mutex
+	inFlight      int
+	maxConcurrent int
+	delay         time.Duration
+}
+
+func (e *concurrencyTrackingExecutor) Execute(ctx context.Context, _ string, input nodeclient.ExecuteInput) (nodeclient.ExecuteOutput, error) {
+	e.mu.Lock()
+	e.inFlight++
+	if e.inFlight > e.maxConcurrent {
+		e.maxConcurrent = e.inFlight
+	}
+	e.mu.Unlock()
+
+	defer func() {
+		e.mu.Lock()
+		e.inFlight--
+		e.mu.Unlock()
+	}()
+
+	delay := e.delay
+	if delay <= 0 {
+		delay = 120 * time.Millisecond
+	}
+	select {
+	case <-ctx.Done():
+		return nodeclient.ExecuteOutput{}, ctx.Err()
+	case <-time.After(delay):
+	}
+
+	return nodeclient.ExecuteOutput{
+		PageTitle: "ok",
+		FinalURL:  input.URL,
+	}, nil
+}
+
+func (e *concurrencyTrackingExecutor) MaxConcurrent() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.maxConcurrent
 }
 
 func TestRunnerRetriesTransientFailures(t *testing.T) {
@@ -694,6 +738,85 @@ func TestRunnerReconcilesQueuedTasksOnStart(t *testing.T) {
 	}
 	if exec.CallCount() != 1 {
 		t.Fatalf("expected 1 executor call, got %d", exec.CallCount())
+	}
+}
+
+func TestRunnerSharedLeasePreventsConcurrentExecutionOnSingleNode(t *testing.T) {
+	taskSvc := task.NewInMemoryService()
+	nodes := pool.NewInMemoryRegistry()
+	_, err := nodes.Register(context.Background(), pool.RegisterInput{NodeID: "node-1", Address: "node-1:8091", Version: "dev"})
+	if err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+
+	sharedLeaser := lease.NewInMemoryManager()
+	exec := &concurrencyTrackingExecutor{delay: 140 * time.Millisecond}
+
+	runner1 := New(taskSvc, nodes, exec, nil, Config{
+		QueueSize:           8,
+		Workers:             1,
+		NodeWaitTimeout:     2 * time.Second,
+		PollInterval:        20 * time.Millisecond,
+		RetryBaseDelay:      20 * time.Millisecond,
+		RetryMaxDelay:       100 * time.Millisecond,
+		Leaser:              sharedLeaser,
+		RunnerInstanceID:    "runner-a",
+		DomainBlockCooldown: 2 * time.Second,
+	}, log.New(io.Discard, "", 0))
+	runner2 := New(taskSvc, nodes, exec, nil, Config{
+		QueueSize:           8,
+		Workers:             1,
+		NodeWaitTimeout:     2 * time.Second,
+		PollInterval:        20 * time.Millisecond,
+		RetryBaseDelay:      20 * time.Millisecond,
+		RetryMaxDelay:       100 * time.Millisecond,
+		Leaser:              sharedLeaser,
+		RunnerInstanceID:    "runner-b",
+		DomainBlockCooldown: 2 * time.Second,
+	}, log.New(io.Discard, "", 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner1.Start(ctx)
+	runner2.Start(ctx)
+
+	first, err := taskSvc.Create(ctx, task.CreateInput{
+		SessionID:  "sess_1",
+		URL:        "https://example.com/1",
+		Goal:       "one",
+		MaxRetries: 0,
+	})
+	if err != nil {
+		t.Fatalf("create first task: %v", err)
+	}
+	second, err := taskSvc.Create(ctx, task.CreateInput{
+		SessionID:  "sess_2",
+		URL:        "https://example.com/2",
+		Goal:       "two",
+		MaxRetries: 0,
+	})
+	if err != nil {
+		t.Fatalf("create second task: %v", err)
+	}
+
+	if err := runner1.Enqueue(ctx, first.ID); err != nil {
+		t.Fatalf("enqueue first task: %v", err)
+	}
+	if err := runner2.Enqueue(ctx, second.ID); err != nil {
+		t.Fatalf("enqueue second task: %v", err)
+	}
+
+	firstResult := waitForTerminalTask(t, ctx, taskSvc, first.ID, 5*time.Second)
+	secondResult := waitForTerminalTask(t, ctx, taskSvc, second.ID, 5*time.Second)
+	if firstResult.Status != task.StatusCompleted {
+		t.Fatalf("expected first task completed, got %s", firstResult.Status)
+	}
+	if secondResult.Status != task.StatusCompleted {
+		t.Fatalf("expected second task completed, got %s", secondResult.Status)
+	}
+
+	if got := exec.MaxConcurrent(); got != 1 {
+		t.Fatalf("expected max executor concurrency 1 with shared lease on single node, got %d", got)
 	}
 }
 

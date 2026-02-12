@@ -70,6 +70,19 @@ func (s *PostgresService) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *PostgresService) Get(ctx context.Context, id string) (Session, error) {
+	trimmedID := strings.TrimSpace(id)
+	if trimmedID == "" {
+		return Session{}, ErrSessionNotFound
+	}
+	row := s.pool.QueryRow(ctx, `
+SELECT id, tenant_id, status, created_at
+FROM sessions
+WHERE id = $1
+`, trimmedID)
+	return scanSession(row)
+}
+
 func (s *PostgresService) initSchema(ctx context.Context) error {
 	statements := []string{
 		`

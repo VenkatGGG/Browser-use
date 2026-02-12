@@ -30,6 +30,7 @@ type CreateInput struct {
 
 type Service interface {
 	Create(ctx context.Context, input CreateInput) (Session, error)
+	Get(ctx context.Context, id string) (Session, error)
 	Delete(ctx context.Context, id string) error
 }
 
@@ -71,4 +72,15 @@ func (s *InMemoryService) Delete(_ context.Context, id string) error {
 	}
 	delete(s.items, id)
 	return nil
+}
+
+func (s *InMemoryService) Get(_ context.Context, id string) (Session, error) {
+	trimmedID := id
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, ok := s.items[trimmedID]
+	if !ok {
+		return Session{}, ErrSessionNotFound
+	}
+	return session, nil
 }

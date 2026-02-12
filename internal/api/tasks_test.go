@@ -52,10 +52,20 @@ func (d *immediateCompleteDispatcher) Enqueue(_ context.Context, taskID string) 
 	return nil
 }
 
+func mustCreateSessionID(t *testing.T, svc session.Service, tenantID string) string {
+	t.Helper()
+	created, err := svc.Create(context.Background(), session.CreateInput{TenantID: tenantID})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	return created.ID
+}
+
 func TestCreateTaskWithActionsQueued(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
+	sessionSvc := session.NewInMemoryService()
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -64,8 +74,9 @@ func TestCreateTaskWithActionsQueued(t *testing.T) {
 		nil,
 	)
 
+	sessionID := mustCreateSessionID(t, sessionSvc, "actions")
 	body := []byte(`{
-		"session_id": "sess_123",
+		"session_id": "` + sessionID + `",
 		"url": "https://example.com",
 		"goal": "fill form",
 		"actions": [
@@ -104,8 +115,9 @@ func TestCreateTaskWithActionsQueued(t *testing.T) {
 
 func TestCreateTaskLegacyAliasQueued(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
+	sessionSvc := session.NewInMemoryService()
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -114,7 +126,8 @@ func TestCreateTaskLegacyAliasQueued(t *testing.T) {
 		nil,
 	)
 
-	body := []byte(`{"session_id":"sess_legacy","url":"https://example.com","goal":"open","wait_for_completion":false}`)
+	sessionID := mustCreateSessionID(t, sessionSvc, "legacy")
+	body := []byte(`{"session_id":"` + sessionID + `","url":"https://example.com","goal":"open","wait_for_completion":false}`)
 	req := httptest.NewRequest(http.MethodPost, "/task", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -167,6 +180,35 @@ func TestCreateTaskAutoCreatesSessionWhenMissing(t *testing.T) {
 	}
 }
 
+func TestCreateTaskWithUnknownSessionIDFails(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	body := []byte(`{"session_id":"sess_missing","url":"https://example.com","goal":"open"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown session_id, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "session_id") || !strings.Contains(rr.Body.String(), "not found") {
+		t.Fatalf("expected unknown session error message, got body=%s", rr.Body.String())
+	}
+	if len(dispatcher.taskIDs) != 0 {
+		t.Fatalf("expected no enqueued tasks when session_id is unknown")
+	}
+}
+
 func TestTaskAliasDefaultsToSynchronousWait(t *testing.T) {
 	svc := task.NewInMemoryService()
 	dispatcher := &immediateCompleteDispatcher{svc: svc}
@@ -201,9 +243,10 @@ func TestTaskAliasDefaultsToSynchronousWait(t *testing.T) {
 
 func TestV1TasksDefaultsToAsyncMode(t *testing.T) {
 	svc := task.NewInMemoryService()
+	sessionSvc := session.NewInMemoryService()
 	dispatcher := &immediateCompleteDispatcher{svc: svc}
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		svc,
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -212,7 +255,8 @@ func TestV1TasksDefaultsToAsyncMode(t *testing.T) {
 		nil,
 	)
 
-	body := []byte(`{"session_id":"sess_1","url":"https://example.com","goal":"open"}`)
+	sessionID := mustCreateSessionID(t, sessionSvc, "v1-async")
+	body := []byte(`{"session_id":"` + sessionID + `","url":"https://example.com","goal":"open"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -251,8 +295,9 @@ func TestCreateTaskMissingSessionFailsWhenSessionServiceUnavailable(t *testing.T
 
 func TestCreateTaskIdempotencyKeyReturnsSameTaskAndSingleDispatch(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
+	sessionSvc := session.NewInMemoryService()
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -261,7 +306,8 @@ func TestCreateTaskIdempotencyKeyReturnsSameTaskAndSingleDispatch(t *testing.T) 
 		nil,
 	)
 
-	body1 := []byte(`{"session_id":"sess_1","url":"https://example.com","goal":"open"}`)
+	sessionID := mustCreateSessionID(t, sessionSvc, "idempotent")
+	body1 := []byte(`{"session_id":"` + sessionID + `","url":"https://example.com","goal":"open"}`)
 	req1 := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body1))
 	req1.Header.Set("Content-Type", "application/json")
 	req1.Header.Set("Idempotency-Key", "task-key-1")
@@ -271,7 +317,7 @@ func TestCreateTaskIdempotencyKeyReturnsSameTaskAndSingleDispatch(t *testing.T) 
 		t.Fatalf("expected first task status 202, got %d body=%s", rr1.Code, rr1.Body.String())
 	}
 
-	body2 := []byte(`{"session_id":"sess_1","url":"https://example.com","goal":"open changed"}`)
+	body2 := []byte(`{"session_id":"` + sessionID + `","url":"https://example.com","goal":"open changed"}`)
 	req2 := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body2))
 	req2.Header.Set("Content-Type", "application/json")
 	req2.Header.Set("Idempotency-Key", "task-key-1")
@@ -303,8 +349,9 @@ func TestCreateTaskIdempotencyKeyReturnsSameTaskAndSingleDispatch(t *testing.T) 
 func TestCreateTaskQueueFullMarksFailed(t *testing.T) {
 	dispatcher := &recordingDispatcher{err: taskrunner.ErrQueueFull}
 	svc := task.NewInMemoryService()
+	sessionSvc := session.NewInMemoryService()
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		svc,
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -313,7 +360,8 @@ func TestCreateTaskQueueFullMarksFailed(t *testing.T) {
 		nil,
 	)
 
-	body := []byte(`{"session_id":"sess_123","url":"https://example.com","goal":"fill form"}`)
+	sessionID := mustCreateSessionID(t, sessionSvc, "queue-full")
+	body := []byte(`{"session_id":"` + sessionID + `","url":"https://example.com","goal":"fill form"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -345,8 +393,9 @@ func TestCreateTaskQueueFullMarksFailed(t *testing.T) {
 
 func TestCreateTaskMaxRetriesOverride(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
+	sessionSvc := session.NewInMemoryService()
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -355,7 +404,8 @@ func TestCreateTaskMaxRetriesOverride(t *testing.T) {
 		nil,
 	)
 
-	body := []byte(`{"session_id":"sess_123","url":"https://example.com","goal":"fill form","max_retries":5}`)
+	sessionID := mustCreateSessionID(t, sessionSvc, "retries")
+	body := []byte(`{"session_id":"` + sessionID + `","url":"https://example.com","goal":"fill form","max_retries":5}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -376,9 +426,10 @@ func TestCreateTaskMaxRetriesOverride(t *testing.T) {
 
 func TestCreateTaskWaitForCompletionReturnsTerminalTask(t *testing.T) {
 	svc := task.NewInMemoryService()
+	sessionSvc := session.NewInMemoryService()
 	dispatcher := &immediateCompleteDispatcher{svc: svc}
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		svc,
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -387,8 +438,9 @@ func TestCreateTaskWaitForCompletionReturnsTerminalTask(t *testing.T) {
 		nil,
 	)
 
+	sessionID := mustCreateSessionID(t, sessionSvc, "wait-complete")
 	body := []byte(`{
-		"session_id":"sess_wait",
+		"session_id":"` + sessionID + `",
 		"url":"https://example.com",
 		"goal":"open and complete",
 		"wait_for_completion":true,
@@ -417,8 +469,9 @@ func TestCreateTaskWaitForCompletionReturnsTerminalTask(t *testing.T) {
 
 func TestCreateTaskWaitForCompletionTimeoutReturnsAccepted(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
+	sessionSvc := session.NewInMemoryService()
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		task.NewInMemoryService(),
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -427,8 +480,9 @@ func TestCreateTaskWaitForCompletionTimeoutReturnsAccepted(t *testing.T) {
 		nil,
 	)
 
+	sessionID := mustCreateSessionID(t, sessionSvc, "wait-timeout")
 	body := []byte(`{
-		"session_id":"sess_wait",
+		"session_id":"` + sessionID + `",
 		"url":"https://example.com",
 		"goal":"open and complete",
 		"wait_for_completion":true,

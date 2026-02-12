@@ -210,6 +210,15 @@ func (s *Server) createAndQueueTaskNonIdempotent(w http.ResponseWriter, r *http.
 func (s *Server) resolveTaskSessionID(ctx context.Context, sessionID, tenantID string) (string, error) {
 	id := strings.TrimSpace(sessionID)
 	if id != "" {
+		if s.sessions == nil {
+			return id, nil
+		}
+		if _, err := s.sessions.Get(ctx, id); err != nil {
+			if errors.Is(err, session.ErrSessionNotFound) {
+				return "", fmt.Errorf("session_id %q not found", id)
+			}
+			return "", fmt.Errorf("failed to load session %q: %w", id, err)
+		}
 		return id, nil
 	}
 	if s.sessions == nil {

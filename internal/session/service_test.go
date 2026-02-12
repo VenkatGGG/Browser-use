@@ -28,6 +28,14 @@ func TestInMemoryServiceCreateAndDelete(t *testing.T) {
 		t.Fatalf("expected created_at")
 	}
 
+	found, err := svc.Get(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if found.ID != created.ID {
+		t.Fatalf("expected get id %q, got %q", created.ID, found.ID)
+	}
+
 	if err := svc.Delete(context.Background(), created.ID); err != nil {
 		t.Fatalf("delete session: %v", err)
 	}
@@ -35,6 +43,9 @@ func TestInMemoryServiceCreateAndDelete(t *testing.T) {
 	err = svc.Delete(context.Background(), created.ID)
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("expected ErrSessionNotFound on second delete, got %v", err)
+	}
+	if _, err := svc.Get(context.Background(), created.ID); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("expected ErrSessionNotFound on get after delete, got %v", err)
 	}
 }
 
