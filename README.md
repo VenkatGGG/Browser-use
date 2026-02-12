@@ -108,6 +108,16 @@ Local-first orchestration infrastructure for AI browser automation.
     - `NODE_AGENT_PLANNER_MODEL`
     - `NODE_AGENT_PLANNER_TIMEOUT`
     - `NODE_AGENT_PLANNER_MAX_ELEMENTS`
+- Added optional built-in model planner mode:
+  - `NODE_AGENT_PLANNER_MODE=openai`
+  - uses OpenAI Chat Completions API directly from node-agent
+  - defaults to `https://api.openai.com/v1/chat/completions`
+  - configure with:
+    - `NODE_AGENT_PLANNER_AUTH_TOKEN` (OpenAI API key)
+    - `NODE_AGENT_PLANNER_MODEL` (defaults to `gpt-4o-mini`)
+    - `NODE_AGENT_PLANNER_ENDPOINT_URL` (optional custom-compatible endpoint)
+    - `NODE_AGENT_PLANNER_TIMEOUT`
+    - `NODE_AGENT_PLANNER_MAX_ELEMENTS`
 - Endpoint planner has safe fallback to deterministic heuristic planning on endpoint failures/invalid output.
 - Built-in template planner now handles common commerce extraction goals (for example: search + extract price) without external planner services.
 - Task records now persist execution trace steps (`trace`) including action payload, step status, timing, and failure reason when available.
@@ -265,7 +275,7 @@ make clean-pool-nodes
 - Task status payload now also includes `trace` for step-by-step execution visibility.
 - Task status payload includes `extracted_outputs` derived from successful `extract_text` steps.
 - Supported deterministic action types include `wait_for`, `click`, `type`, `extract_text`, `scroll`, `wait`, `press_enter`, and `wait_for_url_contains`.
-- Planner mode defaults to `template`; set `NODE_AGENT_PLANNER_MODE=endpoint` to call an external planner API using compact page state.
+- Planner mode defaults to `template`; set `NODE_AGENT_PLANNER_MODE=endpoint` to call an external planner API using compact page state, or `NODE_AGENT_PLANNER_MODE=openai` to use direct model-backed planning.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
 - `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.
 - `Idempotency-Key` header is supported on `POST /v1/sessions` and `POST /v1/tasks`.
