@@ -140,6 +140,7 @@ Local-first orchestration infrastructure for AI browser automation.
   - live polling controls (pause/resume, refresh interval, fetch limit)
   - filtered task feed (status/search/artifact/failure/blocker/sort)
   - per-row quick actions (replay/cancel where applicable) in task feed
+  - batch/shortcut operator controls (cancel visible, replay/cancel selected, keyboard navigation)
   - blocker-aware task table column + blocker KPIs (count and rate)
   - selectable task detail panel with metadata, lineage jump-to-source, action JSON, and replay
   - task cancellation action for queued/running tasks directly from task detail

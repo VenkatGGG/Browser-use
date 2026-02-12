@@ -343,6 +343,20 @@
       margin-top: 12px;
     }
 
+    .task-controls {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .task-controls-note {
+      color: #607078;
+      font-size: 11px;
+      margin-left: auto;
+    }
+
     .hint {
       margin-top: 7px;
       color: var(--muted);
@@ -968,6 +982,13 @@
               </select>
             </div>
             <button class="btn btn-secondary" type="button" id="clear-filters-btn">Clear</button>
+          </div>
+          <div class="task-controls">
+            <button class="btn btn-secondary" type="button" id="replay-selected-btn">Replay Selected</button>
+            <button class="btn btn-secondary" type="button" id="replay-selected-fresh-btn">Replay Selected Fresh</button>
+            <button class="btn btn-danger" type="button" id="cancel-selected-btn">Cancel Selected</button>
+            <button class="btn btn-danger" type="button" id="cancel-visible-btn">Cancel Visible</button>
+            <span class="task-controls-note">Shortcuts: J/K select, R replay, Shift+R replay fresh, C cancel.</span>
           </div>
 
           <div class="tasks-grid">
@@ -1797,6 +1818,56 @@
       }
     }
 
+    function getSelectedTask() {
+      const id = String(state.selectedTaskID || '').trim();
+      if (!id) return null;
+      return state.tasks.find((task) => task.id === id) || null;
+    }
+
+    function focusTaskByOffset(offset) {
+      const rows = state.filteredTasks;
+      if (!rows.length) return;
+
+      const currentID = String(state.selectedTaskID || '').trim();
+      let index = rows.findIndex((task) => task.id === currentID);
+      if (index < 0) {
+        index = offset > 0 ? 0 : rows.length - 1;
+      } else {
+        index = Math.min(rows.length - 1, Math.max(0, index + offset));
+      }
+      state.selectedTaskID = rows[index].id || '';
+      renderTaskTable();
+      renderDetail();
+    }
+
+    function isInteractiveInput(target) {
+      if (!target || typeof target.closest !== 'function') return false;
+      return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+    }
+
+    async function cancelVisibleTasks() {
+      const cancelable = state.filteredTasks.filter((task) => isTaskCancelable(task));
+      if (!cancelable.length) {
+        createStatusEl.textContent = 'No cancelable tasks in current filtered view.';
+        return;
+      }
+      createStatusEl.textContent = 'Canceling ' + cancelable.length + ' visible task(s)...';
+
+      let canceledCount = 0;
+      for (const task of cancelable) {
+        try {
+          await requestJSON('/v1/tasks/' + encodeURIComponent(task.id || '') + '/cancel', {
+            method: 'POST'
+          });
+          canceledCount += 1;
+        } catch (_error) {
+          // Best effort for batch cancellation.
+        }
+      }
+      createStatusEl.textContent = 'Canceled ' + canceledCount + ' of ' + cancelable.length + ' visible task(s).';
+      await refreshDashboard();
+    }
+
     function applyPreset(value) {
       const urlInput = document.getElementById('task-url');
       const goalInput = document.getElementById('task-goal');
@@ -1975,6 +2046,41 @@
         renderAll();
       });
 
+      document.getElementById('replay-selected-btn').addEventListener('click', async () => {
+        const task = getSelectedTask();
+        if (!task) {
+          createStatusEl.textContent = 'Select a task to replay.';
+          return;
+        }
+        await replayTask(task, { freshSession: false });
+      });
+
+      document.getElementById('replay-selected-fresh-btn').addEventListener('click', async () => {
+        const task = getSelectedTask();
+        if (!task) {
+          createStatusEl.textContent = 'Select a task to replay in a fresh session.';
+          return;
+        }
+        await replayTask(task, { freshSession: true });
+      });
+
+      document.getElementById('cancel-selected-btn').addEventListener('click', async () => {
+        const task = getSelectedTask();
+        if (!task) {
+          createStatusEl.textContent = 'Select a task to cancel.';
+          return;
+        }
+        if (!isTaskCancelable(task)) {
+          createStatusEl.textContent = 'Selected task is not cancelable (status=' + String(task.status || '-') + ').';
+          return;
+        }
+        await cancelTask(task, null);
+      });
+
+      document.getElementById('cancel-visible-btn').addEventListener('click', async () => {
+        await cancelVisibleTasks();
+      });
+
       document.addEventListener('click', (event) => {
         const nodeActionTarget = event.target.closest('[data-node-action][data-node-id]');
         if (nodeActionTarget) {
@@ -2066,7 +2172,35 @@
       });
 
       document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') closeModal();
+        if (event.key === 'Escape') {
+          closeModal();
+          return;
+        }
+        if (isInteractiveInput(event.target)) return;
+
+        if (event.key === 'j' || event.key === 'J') {
+          event.preventDefault();
+          focusTaskByOffset(1);
+          return;
+        }
+        if (event.key === 'k' || event.key === 'K') {
+          event.preventDefault();
+          focusTaskByOffset(-1);
+          return;
+        }
+        if (event.key === 'r' || event.key === 'R') {
+          const task = getSelectedTask();
+          if (!task) return;
+          event.preventDefault();
+          void replayTask(task, { freshSession: event.shiftKey });
+          return;
+        }
+        if (event.key === 'c' || event.key === 'C') {
+          const task = getSelectedTask();
+          if (!task || !isTaskCancelable(task)) return;
+          event.preventDefault();
+          void cancelTask(task, null);
+        }
       });
     }
 
