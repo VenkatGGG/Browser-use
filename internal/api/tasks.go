@@ -210,14 +210,8 @@ func (s *Server) createAndQueueTaskNonIdempotent(w http.ResponseWriter, r *http.
 func (s *Server) resolveTaskSessionID(ctx context.Context, sessionID, tenantID string) (string, error) {
 	id := strings.TrimSpace(sessionID)
 	if id != "" {
-		if s.sessions == nil {
-			return id, nil
-		}
-		if _, err := s.sessions.Get(ctx, id); err != nil {
-			if errors.Is(err, session.ErrSessionNotFound) {
-				return "", fmt.Errorf("session_id %q not found", id)
-			}
-			return "", fmt.Errorf("failed to load session %q: %w", id, err)
+		if err := s.ensureSessionExists(ctx, id); err != nil {
+			return "", err
 		}
 		return id, nil
 	}
@@ -235,6 +229,23 @@ func (s *Server) resolveTaskSessionID(ctx context.Context, sessionID, tenantID s
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 	return created.ID, nil
+}
+
+func (s *Server) ensureSessionExists(ctx context.Context, sessionID string) error {
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return errors.New("session_id is required")
+	}
+	if s.sessions == nil {
+		return nil
+	}
+	if _, err := s.sessions.Get(ctx, id); err != nil {
+		if errors.Is(err, session.ErrSessionNotFound) {
+			return fmt.Errorf("session_id %q not found", id)
+		}
+		return fmt.Errorf("failed to load session %q: %w", id, err)
+	}
+	return nil
 }
 
 func (s *Server) replayTask(w http.ResponseWriter, r *http.Request, sourceTaskID string) {
@@ -287,6 +298,10 @@ func (s *Server) replayTaskNonIdempotent(w http.ResponseWriter, r *http.Request,
 	}
 	if sessionID == "" {
 		sessionID = strings.TrimSpace(original.SessionID)
+	}
+	if err := s.ensureSessionExists(r.Context(), sessionID); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "replay_failed", err.Error())
+		return
 	}
 	maxRetries := original.MaxRetries
 	if req.MaxRetries != nil {

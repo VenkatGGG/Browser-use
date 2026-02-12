@@ -744,8 +744,9 @@ func TestTaskStatsInvalidLimit(t *testing.T) {
 func TestReplayTaskQueued(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
 	svc := task.NewInMemoryService()
+	sessionSvc := session.NewInMemoryService()
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		svc,
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -754,8 +755,9 @@ func TestReplayTaskQueued(t *testing.T) {
 		nil,
 	)
 
+	originalSessionID := mustCreateSessionID(t, sessionSvc, "replay-original")
 	original, err := svc.Create(context.Background(), task.CreateInput{
-		SessionID:  "sess_original",
+		SessionID:  originalSessionID,
 		URL:        "https://example.com",
 		Goal:       "open page",
 		Actions:    []task.Action{{Type: "wait", DelayMS: 300}},
@@ -806,8 +808,9 @@ func TestReplayTaskQueued(t *testing.T) {
 func TestReplayTaskWithOverrides(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
 	svc := task.NewInMemoryService()
+	sessionSvc := session.NewInMemoryService()
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		svc,
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -816,8 +819,9 @@ func TestReplayTaskWithOverrides(t *testing.T) {
 		nil,
 	)
 
+	originalSessionID := mustCreateSessionID(t, sessionSvc, "replay-original")
 	original, err := svc.Create(context.Background(), task.CreateInput{
-		SessionID:  "sess_original",
+		SessionID:  originalSessionID,
 		URL:        "https://example.com",
 		Goal:       "open page",
 		MaxRetries: 1,
@@ -826,7 +830,8 @@ func TestReplayTaskWithOverrides(t *testing.T) {
 		t.Fatalf("create original task: %v", err)
 	}
 
-	body := []byte(`{"session_id":"sess_override","max_retries":4}`)
+	overrideSessionID := mustCreateSessionID(t, sessionSvc, "replay-override")
+	body := []byte(`{"session_id":"` + overrideSessionID + `","max_retries":4}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+original.ID+"/replay", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -843,11 +848,49 @@ func TestReplayTaskWithOverrides(t *testing.T) {
 	if replayed.SourceTaskID != original.ID {
 		t.Fatalf("expected source_task_id %s, got %s", original.ID, replayed.SourceTaskID)
 	}
-	if replayed.SessionID != "sess_override" {
+	if replayed.SessionID != overrideSessionID {
 		t.Fatalf("expected overridden session id, got %s", replayed.SessionID)
 	}
 	if replayed.MaxRetries != 4 {
 		t.Fatalf("expected overridden max_retries 4, got %d", replayed.MaxRetries)
+	}
+}
+
+func TestReplayTaskWithUnknownOverrideSessionFails(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	svc := task.NewInMemoryService()
+	sessionSvc := session.NewInMemoryService()
+	srv := NewServer(
+		sessionSvc,
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	originalSessionID := mustCreateSessionID(t, sessionSvc, "replay-original")
+	original, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID:  originalSessionID,
+		URL:        "https://example.com",
+		Goal:       "open page",
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("create original task: %v", err)
+	}
+
+	body := []byte(`{"session_id":"sess_missing","max_retries":2}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+original.ID+"/replay", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown replay session_id, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "session_id") || !strings.Contains(rr.Body.String(), "not found") {
+		t.Fatalf("expected unknown session error message, got body=%s", rr.Body.String())
 	}
 }
 
@@ -936,8 +979,9 @@ func TestReplayTaskRejectsConflictingSessionInputs(t *testing.T) {
 func TestReplayTaskIdempotencyKeyReturnsSameTaskAndSingleDispatch(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
 	svc := task.NewInMemoryService()
+	sessionSvc := session.NewInMemoryService()
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		svc,
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -946,8 +990,9 @@ func TestReplayTaskIdempotencyKeyReturnsSameTaskAndSingleDispatch(t *testing.T) 
 		nil,
 	)
 
+	originalSessionID := mustCreateSessionID(t, sessionSvc, "replay-original")
 	original, err := svc.Create(context.Background(), task.CreateInput{
-		SessionID:  "sess_original",
+		SessionID:  originalSessionID,
 		URL:        "https://example.com",
 		Goal:       "open page",
 		MaxRetries: 1,
@@ -1005,8 +1050,9 @@ func TestReplayTaskIdempotencyKeyReturnsSameTaskAndSingleDispatch(t *testing.T) 
 func TestReplayChain(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
 	svc := task.NewInMemoryService()
+	sessionSvc := session.NewInMemoryService()
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		svc,
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -1015,8 +1061,9 @@ func TestReplayChain(t *testing.T) {
 		nil,
 	)
 
+	rootSessionID := mustCreateSessionID(t, sessionSvc, "replay-root")
 	root, err := svc.Create(context.Background(), task.CreateInput{
-		SessionID:  "sess_root",
+		SessionID:  rootSessionID,
 		URL:        "https://example.com",
 		Goal:       "root",
 		MaxRetries: 1,
@@ -1086,8 +1133,9 @@ func TestReplayChainInvalidDepth(t *testing.T) {
 func TestListDirectReplays(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
 	svc := task.NewInMemoryService()
+	sessionSvc := session.NewInMemoryService()
 	srv := NewServer(
-		session.NewInMemoryService(),
+		sessionSvc,
 		svc,
 		pool.NewInMemoryRegistry(),
 		dispatcher,
@@ -1096,8 +1144,9 @@ func TestListDirectReplays(t *testing.T) {
 		nil,
 	)
 
+	rootSessionID := mustCreateSessionID(t, sessionSvc, "replay-root")
 	root, err := svc.Create(context.Background(), task.CreateInput{
-		SessionID:  "sess_root",
+		SessionID:  rootSessionID,
 		URL:        "https://example.com",
 		Goal:       "root",
 		MaxRetries: 1,

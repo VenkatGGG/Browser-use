@@ -305,5 +305,7 @@ make soak-local      # enqueue/poll many tasks and print reliability summary
   - `ORCHESTRATOR_RATE_LIMIT_PER_MINUTE=<N>` enables per-client fixed-window rate limiting on those same write routes.
 - Node-agent now detects blocker pages (captcha/human verification/form validation), returns structured blocker metadata, and runner persists blocker evidence on failed tasks without retry loops.
 - Node-agent now performs a short blocker re-check for likely transient anti-bot interstitials (for example Cloudflare "checking your browser") before classifying a task as blocked.
+- Planner fallback behavior is now explicitly logged (planner mode, fallback planner, cause, and action count) for easier debugging of endpoint/OpenAI planner failures.
 - Runner applies per-domain cooldowns after challenge blockers (`human_verification_required` / `bot_blocked`) to fail subsequent tasks fast until cooldown expires.
+- Task create and replay flows now validate provided `session_id` values against the session store and reject unknown sessions.
 - Warm-pool manager is currently feature-flagged and intended for host-run orchestrator mode (`make run-orchestrator`) where `docker` CLI is available; compose mode keeps static node service by default.

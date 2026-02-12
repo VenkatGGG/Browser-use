@@ -394,8 +394,7 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 				return "", err
 			}
 		}
-		if action.DelayMS > 0 {
-			delay := time.Duration(action.DelayMS) * time.Millisecond
+		if delay := boundedActionDelay(action.DelayMS, 0); delay > 0 {
 			select {
 			case <-actionCtx.Done():
 				return "", actionCtx.Err()
@@ -411,8 +410,7 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		if err := client.Scroll(actionCtx, direction, action.Pixels); err != nil {
 			return "", err
 		}
-		if action.DelayMS > 0 {
-			delay := time.Duration(action.DelayMS) * time.Millisecond
+		if delay := boundedActionDelay(action.DelayMS, 0); delay > 0 {
 			select {
 			case <-actionCtx.Done():
 				return "", actionCtx.Err()
@@ -463,10 +461,7 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		}
 		return "", errors.New("extract_text failed: " + strings.Join(attemptErrors, " | "))
 	case "wait":
-		delay := time.Duration(action.DelayMS) * time.Millisecond
-		if delay <= 0 {
-			delay = 500 * time.Millisecond
-		}
+		delay := boundedActionDelay(action.DelayMS, 500*time.Millisecond)
 		select {
 		case <-actionCtx.Done():
 			return "", actionCtx.Err()
@@ -520,7 +515,27 @@ func actionTimeout(timeoutMS int) time.Duration {
 	if timeoutMS <= 0 {
 		return 12 * time.Second
 	}
+	if timeoutMS < 250 {
+		timeoutMS = 250
+	}
+	if timeoutMS > 60000 {
+		timeoutMS = 60000
+	}
 	return time.Duration(timeoutMS) * time.Millisecond
+}
+
+func boundedActionDelay(delayMS int, fallback time.Duration) time.Duration {
+	if delayMS <= 0 {
+		return fallback
+	}
+	delay := time.Duration(delayMS) * time.Millisecond
+	if delay < 0 {
+		return fallback
+	}
+	if delay > 15*time.Second {
+		return 15 * time.Second
+	}
+	return delay
 }
 
 func splitExtractSelectorCandidates(selector string) []string {

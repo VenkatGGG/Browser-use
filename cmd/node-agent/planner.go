@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -246,10 +247,19 @@ func (p *endpointPlanner) planFallback(ctx context.Context, goal string, snapsho
 	if p.fallback == nil {
 		return nil, cause
 	}
+	log.Printf(
+		"planner=%s fallback=%s goal=%q cause=%v",
+		p.Name(),
+		p.fallback.Name(),
+		trimSnippet(strings.TrimSpace(goal), 120),
+		cause,
+	)
 	actions, err := p.fallback.Plan(ctx, goal, snapshot)
 	if err != nil {
+		log.Printf("planner fallback failed: planner=%s fallback=%s err=%v", p.Name(), p.fallback.Name(), err)
 		return nil, cause
 	}
+	log.Printf("planner fallback succeeded: planner=%s fallback=%s actions=%d", p.Name(), p.fallback.Name(), len(actions))
 	return actions, nil
 }
 
@@ -361,10 +371,19 @@ func (p *openAIPlanner) planFallback(ctx context.Context, goal string, snapshot 
 	if p.fallback == nil {
 		return nil, cause
 	}
+	log.Printf(
+		"planner=%s fallback=%s goal=%q cause=%v",
+		p.Name(),
+		p.fallback.Name(),
+		trimSnippet(strings.TrimSpace(goal), 120),
+		cause,
+	)
 	actions, err := p.fallback.Plan(ctx, goal, snapshot)
 	if err != nil {
+		log.Printf("planner fallback failed: planner=%s fallback=%s err=%v", p.Name(), p.fallback.Name(), err)
 		return nil, cause
 	}
+	log.Printf("planner fallback succeeded: planner=%s fallback=%s actions=%d", p.Name(), p.fallback.Name(), len(actions))
 	return actions, nil
 }
 
