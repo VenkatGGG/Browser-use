@@ -55,6 +55,7 @@ type Task struct {
 	Goal                  string      `json:"goal"`
 	Actions               []Action    `json:"actions,omitempty"`
 	Trace                 []StepTrace `json:"trace,omitempty"`
+	ExtractedOutputs      []string    `json:"extracted_outputs,omitempty"`
 	Status                Status      `json:"status"`
 	Attempt               int         `json:"attempt"`
 	MaxRetries            int         `json:"max_retries"`
@@ -195,6 +196,7 @@ func (s *InMemoryService) Start(_ context.Context, input StartInput) (Task, erro
 	task.BlockerType = ""
 	task.BlockerMessage = ""
 	task.Trace = nil
+	task.ExtractedOutputs = nil
 	s.items[input.TaskID] = task
 	return task, nil
 }
@@ -215,6 +217,7 @@ func (s *InMemoryService) Retry(_ context.Context, input RetryInput) (Task, erro
 	task.BlockerType = ""
 	task.BlockerMessage = ""
 	task.Trace = nil
+	task.ExtractedOutputs = nil
 	s.items[input.TaskID] = task
 	return task, nil
 }
@@ -239,6 +242,7 @@ func (s *InMemoryService) Complete(_ context.Context, input CompleteInput) (Task
 	task.ErrorMessage = ""
 	task.NextRetryAt = nil
 	task.Trace = append([]StepTrace(nil), input.Trace...)
+	task.ExtractedOutputs = deriveExtractedOutputs(task.Trace)
 	task.CompletedAt = &now
 	s.items[input.TaskID] = task
 	return task, nil
@@ -264,6 +268,7 @@ func (s *InMemoryService) Fail(_ context.Context, input FailInput) (Task, error)
 	task.ErrorMessage = input.Error
 	task.NextRetryAt = nil
 	task.Trace = append([]StepTrace(nil), input.Trace...)
+	task.ExtractedOutputs = deriveExtractedOutputs(task.Trace)
 	task.CompletedAt = &now
 	s.items[input.TaskID] = task
 	return task, nil
@@ -384,4 +389,31 @@ func normalizeTime(input time.Time) time.Time {
 		return time.Now().UTC()
 	}
 	return input.UTC()
+}
+
+func deriveExtractedOutputs(trace []StepTrace) []string {
+	if len(trace) == 0 {
+		return nil
+	}
+
+	outputs := make([]string, 0, len(trace))
+	seen := make(map[string]struct{}, len(trace))
+	for _, step := range trace {
+		value := strings.TrimSpace(step.OutputText)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		outputs = append(outputs, value)
+		if len(outputs) >= 20 {
+			break
+		}
+	}
+	if len(outputs) == 0 {
+		return nil
+	}
+	return outputs
 }

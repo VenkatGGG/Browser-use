@@ -1434,10 +1434,14 @@
 
       const actionsJSON = JSON.stringify(task.actions || [], null, 2);
       const trace = Array.isArray(task.trace) ? task.trace : [];
+      const extractedOutputs = Array.isArray(task.extracted_outputs) ? task.extracted_outputs : [];
       const traceJSON = JSON.stringify(trace, null, 2);
       const traceSummary = trace.length
         ? (trace.length + " step(s), " + trace.filter((item) => String(item.status || "").toLowerCase() === "failed").length + " failed")
         : "no trace";
+      const extractedSummary = extractedOutputs.length
+        ? extractedOutputs.map((item) => compactText(item, 140)).join(" | ")
+        : "-";
       const traceBlock = renderTrace(trace);
       const artifactButton = task.screenshot_artifact_url
         ? '<button type="button" class="btn btn-secondary" data-artifact="' + escapeHTML(task.screenshot_artifact_url) + '">Preview Artifact</button>'
@@ -1476,6 +1480,7 @@
           '<div class="pair"><span class="k">Blocker</span><span class="v">' + escapeHTML((task.blocker_type || '-') + (task.blocker_message ? (': ' + task.blocker_message) : '')) + '</span></div>' +
           '<div class="pair"><span class="k">Error</span><span class="v">' + escapeHTML(task.error_message || '-') + '</span></div>' +
           '<div class="pair"><span class="k">Artifact URL</span><span class="v">' + openArtifactLink + '</span></div>' +
+          '<div class="pair"><span class="k">Extracted Outputs</span><span class="v">' + escapeHTML(extractedSummary) + '</span></div>' +
           '<div class="pair"><span class="k">Trace Summary</span><span class="v mono">' + escapeHTML(traceSummary) + '</span></div>' +
           '<div class="pair"><span class="k">Execution Trace</span>' + traceBlock + '</div>' +
           '<div class="pair"><span class="k">Trace JSON</span><pre class="json">' + escapeHTML(traceJSON) + '</pre></div>' +

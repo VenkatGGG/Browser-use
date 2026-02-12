@@ -508,6 +508,7 @@ func scanTask(row rowScanner) (Task, error) {
 	item.BlockerType = deref(blockerType)
 	item.BlockerMessage = deref(blockerMessage)
 	item.ErrorMessage = deref(errorMessage)
+	item.ExtractedOutputs = deriveExtractedOutputs(item.Trace)
 
 	return item, nil
 }
