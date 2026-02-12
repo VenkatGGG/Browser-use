@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -57,6 +58,18 @@ func (s *grpcNodeAgentServer) Act(ctx context.Context, req *nodev1.ActRequest) (
 			actions,
 		)
 		if err != nil {
+			var flowErr *executeFlowError
+			if errors.As(err, &flowErr) {
+				raw, marshalErr := json.Marshal(flowErr.result)
+				if marshalErr != nil {
+					return &nodev1.ActResponse{Ok: false, ErrorMessage: err.Error()}, nil
+				}
+				return &nodev1.ActResponse{
+					Ok:           false,
+					ErrorMessage: err.Error(),
+					MetadataJson: string(raw),
+				}, nil
+			}
 			return &nodev1.ActResponse{Ok: false, ErrorMessage: err.Error()}, nil
 		}
 		raw, err := json.Marshal(result)

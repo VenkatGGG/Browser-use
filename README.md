@@ -108,6 +108,7 @@ Local-first orchestration infrastructure for AI browser automation.
     - `NODE_AGENT_PLANNER_TIMEOUT`
     - `NODE_AGENT_PLANNER_MAX_ELEMENTS`
 - Endpoint planner has safe fallback to deterministic heuristic planning on endpoint failures/invalid output.
+- Task records now persist execution trace steps (`trace`) including action payload, step status, timing, and failure reason when available.
 
 ### Phase 4 started (dashboard)
 - Orchestrator now serves a live dashboard at `GET /dashboard`.
@@ -230,6 +231,7 @@ make run-orchestrator
 - Queued tasks are reconciled from Postgres on runner startup/restart.
 - Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
+- Task status payload now also includes `trace` for step-by-step execution visibility.
 - Supported deterministic action types include `wait_for`, `click`, `type`, `scroll`, `wait`, `press_enter`, and `wait_for_url_contains`.
 - Planner mode defaults to `heuristic`; set `NODE_AGENT_PLANNER_MODE=endpoint` to call an external planner API using compact page state.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.

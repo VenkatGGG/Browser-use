@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -71,19 +70,19 @@ func (c *GRPCClient) Execute(ctx context.Context, nodeAddress string, input Exec
 	if err != nil {
 		return ExecuteOutput{}, fmt.Errorf("grpc execute_flow failed: %w", err)
 	}
-	if !actResp.GetOk() {
-		msg := strings.TrimSpace(actResp.GetErrorMessage())
-		if msg == "" {
-			msg = "node execution failed"
-		}
-		return ExecuteOutput{}, errors.New(msg)
-	}
 
 	var out ExecuteOutput
 	if payload := strings.TrimSpace(actResp.GetMetadataJson()); payload != "" {
 		if err := json.Unmarshal([]byte(payload), &out); err != nil {
 			return ExecuteOutput{}, fmt.Errorf("decode execute metadata: %w", err)
 		}
+	}
+	if !actResp.GetOk() {
+		msg := strings.TrimSpace(actResp.GetErrorMessage())
+		if msg == "" {
+			msg = "node execution failed"
+		}
+		return out, &ExecutionError{Message: msg, Output: out}
 	}
 
 	// Backfill screenshot through Snapshot RPC when metadata omitted it.

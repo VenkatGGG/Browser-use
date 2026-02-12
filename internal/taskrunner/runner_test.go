@@ -64,6 +64,43 @@ func (b *blockerExecutor) CallCount() int {
 	return b.calls
 }
 
+type traceErrorExecutor struct {
+	calls int
+}
+
+func (e *traceErrorExecutor) Execute(_ context.Context, _ string, input nodeclient.ExecuteInput) (nodeclient.ExecuteOutput, error) {
+	e.calls++
+	out := nodeclient.ExecuteOutput{
+		PageTitle: "Failure Page",
+		FinalURL:  input.URL,
+		Trace: []nodeclient.StepTrace{
+			{
+				Index: 1,
+				Action: nodeclient.Action{
+					Type:     "wait_for",
+					Selector: "input[name='q']",
+				},
+				Status:     "succeeded",
+				DurationMS: 100,
+			},
+			{
+				Index: 2,
+				Action: nodeclient.Action{
+					Type:     "click",
+					Selector: "button.buy",
+				},
+				Status:     "failed",
+				Error:      "click failed: not_found",
+				DurationMS: 300,
+			},
+		},
+	}
+	return out, &nodeclient.ExecutionError{
+		Message: "click failed: not_found",
+		Output:  out,
+	}
+}
+
 func TestRunnerRetriesTransientFailures(t *testing.T) {
 	taskSvc := task.NewInMemoryService()
 	nodes := pool.NewInMemoryRegistry()
@@ -364,6 +401,60 @@ func TestRunnerFailsFastOnBlockerResponse(t *testing.T) {
 	}
 	if failed.BlockerMessage == "" {
 		t.Fatalf("expected blocker message persisted")
+	}
+}
+
+func TestRunnerPersistsTraceFromExecutionErrorMetadata(t *testing.T) {
+	taskSvc := task.NewInMemoryService()
+	nodes := pool.NewInMemoryRegistry()
+	_, err := nodes.Register(context.Background(), pool.RegisterInput{NodeID: "node-1", Address: "node-1:8091", Version: "dev"})
+	if err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+
+	exec := &traceErrorExecutor{}
+	runner := New(taskSvc, nodes, exec, nil, Config{
+		QueueSize:       8,
+		Workers:         1,
+		NodeWaitTimeout: 1 * time.Second,
+		PollInterval:    30 * time.Millisecond,
+		RetryBaseDelay:  20 * time.Millisecond,
+		RetryMaxDelay:   100 * time.Millisecond,
+	}, log.New(io.Discard, "", 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Start(ctx)
+
+	created, err := taskSvc.Create(ctx, task.CreateInput{
+		SessionID:  "sess_1",
+		URL:        "https://example.com",
+		Goal:       "buy",
+		MaxRetries: 2,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := runner.Enqueue(ctx, created.ID); err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+
+	failed := waitForTerminalTask(t, ctx, taskSvc, created.ID, 4*time.Second)
+	if failed.Status != task.StatusFailed {
+		t.Fatalf("expected failed status, got %s", failed.Status)
+	}
+	if failed.Attempt != 1 {
+		t.Fatalf("expected 1 attempt, got %d", failed.Attempt)
+	}
+	if len(failed.Trace) != 2 {
+		t.Fatalf("expected persisted trace with 2 steps, got %d", len(failed.Trace))
+	}
+	if failed.Trace[1].Status != "failed" {
+		t.Fatalf("expected second trace step failed, got %q", failed.Trace[1].Status)
+	}
+	if failed.Trace[1].Action.Type != "click" {
+		t.Fatalf("expected second trace action click, got %q", failed.Trace[1].Action.Type)
 	}
 }
 

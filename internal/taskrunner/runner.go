@@ -204,7 +204,21 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		Actions: mapNodeActions(startedTask.Actions),
 	})
 	if err != nil {
-		r.handleExecutionFailure(ctx, startedTask, nodeLease.Node.ID, fmt.Errorf("node execution failed: %w", err))
+		evidence := failureEvidence{}
+		var execErr *nodeclient.ExecutionError
+		if errors.As(err, &execErr) {
+			screenshotBase64, screenshotArtifactURL := r.persistScreenshot(ctx, startedTask.ID, execErr.Output.ScreenshotBase64)
+			evidence = failureEvidence{
+				PageTitle:             execErr.Output.PageTitle,
+				FinalURL:              execErr.Output.FinalURL,
+				ScreenshotBase64:      screenshotBase64,
+				ScreenshotArtifactURL: screenshotArtifactURL,
+				BlockerType:           execErr.Output.BlockerType,
+				BlockerMessage:        execErr.Output.BlockerMessage,
+				Trace:                 mapTaskTrace(execErr.Output.Trace),
+			}
+		}
+		r.handleExecutionFailureWithEvidence(ctx, startedTask, nodeLease.Node.ID, fmt.Errorf("node execution failed: %w", err), evidence)
 		return
 	}
 
@@ -222,6 +236,7 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 			ScreenshotArtifactURL: screenshotArtifactURL,
 			BlockerType:           result.BlockerType,
 			BlockerMessage:        blockerMessage,
+			Trace:                 mapTaskTrace(result.Trace),
 		})
 		return
 	}
@@ -234,6 +249,7 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		FinalURL:              result.FinalURL,
 		ScreenshotBase64:      screenshotBase64,
 		ScreenshotArtifactURL: screenshotArtifactURL,
+		Trace:                 mapTaskTrace(result.Trace),
 	}); err != nil {
 		r.failTask(ctx, startedTask.ID, nodeLease.Node.ID, fmt.Errorf("failed to complete task: %w", err))
 		return
@@ -285,6 +301,20 @@ func (r *Runner) clearEnqueued(taskID string) {
 }
 
 func (r *Runner) handleExecutionFailure(ctx context.Context, taskRecord task.Task, nodeID string, execErr error) {
+	r.handleExecutionFailureWithEvidence(ctx, taskRecord, nodeID, execErr, failureEvidence{})
+}
+
+func (r *Runner) handleExecutionFailureWithEvidence(ctx context.Context, taskRecord task.Task, nodeID string, execErr error, evidence failureEvidence) {
+	if strings.TrimSpace(evidence.BlockerType) != "" {
+		blockerMessage := strings.TrimSpace(evidence.BlockerMessage)
+		if blockerMessage == "" {
+			blockerMessage = "blocking challenge detected"
+		}
+		r.markDomainBlocked(firstNonEmpty(evidence.FinalURL, taskRecord.URL), evidence.BlockerType, time.Now().UTC())
+		r.failTaskWithEvidence(ctx, taskRecord.ID, nodeID, fmt.Errorf("blocked (%s): %s", evidence.BlockerType, blockerMessage), evidence)
+		return
+	}
+
 	if r.shouldRetry(taskRecord, execErr) {
 		delay := r.retryDelay(taskRecord.Attempt)
 		retryAt := time.Now().UTC().Add(delay)
@@ -308,7 +338,7 @@ func (r *Runner) handleExecutionFailure(ctx context.Context, taskRecord task.Tas
 		return
 	}
 
-	r.failTask(ctx, taskRecord.ID, nodeID, execErr)
+	r.failTaskWithEvidence(ctx, taskRecord.ID, nodeID, execErr, evidence)
 }
 
 func (r *Runner) shouldRetry(taskRecord task.Task, execErr error) bool {
@@ -502,6 +532,7 @@ type failureEvidence struct {
 	ScreenshotArtifactURL string
 	BlockerType           string
 	BlockerMessage        string
+	Trace                 []task.StepTrace
 }
 
 func (r *Runner) failTaskWithEvidence(ctx context.Context, taskID, nodeID string, err error, evidence failureEvidence) {
@@ -517,6 +548,7 @@ func (r *Runner) failTaskWithEvidence(ctx context.Context, taskID, nodeID string
 		ScreenshotArtifactURL: evidence.ScreenshotArtifactURL,
 		BlockerType:           evidence.BlockerType,
 		BlockerMessage:        evidence.BlockerMessage,
+		Trace:                 append([]task.StepTrace(nil), evidence.Trace...),
 	})
 }
 
@@ -548,6 +580,37 @@ func mapNodeActions(actions []task.Action) []nodeclient.Action {
 		})
 	}
 	return mapped
+}
+
+func mapTaskTrace(trace []nodeclient.StepTrace) []task.StepTrace {
+	mapped := make([]task.StepTrace, 0, len(trace))
+	for _, step := range trace {
+		mapped = append(mapped, task.StepTrace{
+			Index: step.Index,
+			Action: task.Action{
+				Type:      step.Action.Type,
+				Selector:  step.Action.Selector,
+				Text:      step.Action.Text,
+				Pixels:    step.Action.Pixels,
+				TimeoutMS: step.Action.TimeoutMS,
+				DelayMS:   step.Action.DelayMS,
+			},
+			Status:      step.Status,
+			Error:       step.Error,
+			StartedAt:   utcTimePtr(step.StartedAt),
+			CompletedAt: utcTimePtr(step.CompletedAt),
+			DurationMS:  step.DurationMS,
+		})
+	}
+	return mapped
+}
+
+func utcTimePtr(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	t := value.UTC()
+	return &t
 }
 
 func (r *Runner) isDomainBlocked(rawURL string, now time.Time) (bool, string, time.Time) {

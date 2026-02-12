@@ -34,28 +34,39 @@ type Action struct {
 	DelayMS   int    `json:"delay_ms,omitempty"`
 }
 
+type StepTrace struct {
+	Index       int        `json:"index"`
+	Action      Action     `json:"action"`
+	Status      string     `json:"status"`
+	Error       string     `json:"error,omitempty"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	DurationMS  int64      `json:"duration_ms,omitempty"`
+}
+
 type Task struct {
-	ID                    string     `json:"id"`
-	SourceTaskID          string     `json:"source_task_id,omitempty"`
-	SessionID             string     `json:"session_id"`
-	URL                   string     `json:"url"`
-	Goal                  string     `json:"goal"`
-	Actions               []Action   `json:"actions,omitempty"`
-	Status                Status     `json:"status"`
-	Attempt               int        `json:"attempt"`
-	MaxRetries            int        `json:"max_retries"`
-	NextRetryAt           *time.Time `json:"next_retry_at,omitempty"`
-	NodeID                string     `json:"node_id,omitempty"`
-	PageTitle             string     `json:"page_title,omitempty"`
-	FinalURL              string     `json:"final_url,omitempty"`
-	ScreenshotBase64      string     `json:"screenshot_base64,omitempty"`
-	ScreenshotArtifactURL string     `json:"screenshot_artifact_url,omitempty"`
-	BlockerType           string     `json:"blocker_type,omitempty"`
-	BlockerMessage        string     `json:"blocker_message,omitempty"`
-	ErrorMessage          string     `json:"error_message,omitempty"`
-	CreatedAt             time.Time  `json:"created_at"`
-	StartedAt             *time.Time `json:"started_at,omitempty"`
-	CompletedAt           *time.Time `json:"completed_at,omitempty"`
+	ID                    string      `json:"id"`
+	SourceTaskID          string      `json:"source_task_id,omitempty"`
+	SessionID             string      `json:"session_id"`
+	URL                   string      `json:"url"`
+	Goal                  string      `json:"goal"`
+	Actions               []Action    `json:"actions,omitempty"`
+	Trace                 []StepTrace `json:"trace,omitempty"`
+	Status                Status      `json:"status"`
+	Attempt               int         `json:"attempt"`
+	MaxRetries            int         `json:"max_retries"`
+	NextRetryAt           *time.Time  `json:"next_retry_at,omitempty"`
+	NodeID                string      `json:"node_id,omitempty"`
+	PageTitle             string      `json:"page_title,omitempty"`
+	FinalURL              string      `json:"final_url,omitempty"`
+	ScreenshotBase64      string      `json:"screenshot_base64,omitempty"`
+	ScreenshotArtifactURL string      `json:"screenshot_artifact_url,omitempty"`
+	BlockerType           string      `json:"blocker_type,omitempty"`
+	BlockerMessage        string      `json:"blocker_message,omitempty"`
+	ErrorMessage          string      `json:"error_message,omitempty"`
+	CreatedAt             time.Time   `json:"created_at"`
+	StartedAt             *time.Time  `json:"started_at,omitempty"`
+	CompletedAt           *time.Time  `json:"completed_at,omitempty"`
 }
 
 type CreateInput struct {
@@ -87,6 +98,7 @@ type CompleteInput struct {
 	FinalURL              string
 	ScreenshotBase64      string
 	ScreenshotArtifactURL string
+	Trace                 []StepTrace
 }
 
 type FailInput struct {
@@ -100,6 +112,7 @@ type FailInput struct {
 	ScreenshotArtifactURL string
 	BlockerType           string
 	BlockerMessage        string
+	Trace                 []StepTrace
 }
 
 type Service interface {
@@ -178,6 +191,7 @@ func (s *InMemoryService) Start(_ context.Context, input StartInput) (Task, erro
 	task.ErrorMessage = ""
 	task.BlockerType = ""
 	task.BlockerMessage = ""
+	task.Trace = nil
 	s.items[input.TaskID] = task
 	return task, nil
 }
@@ -197,6 +211,7 @@ func (s *InMemoryService) Retry(_ context.Context, input RetryInput) (Task, erro
 	task.ErrorMessage = input.LastError
 	task.BlockerType = ""
 	task.BlockerMessage = ""
+	task.Trace = nil
 	s.items[input.TaskID] = task
 	return task, nil
 }
@@ -220,6 +235,7 @@ func (s *InMemoryService) Complete(_ context.Context, input CompleteInput) (Task
 	task.BlockerMessage = ""
 	task.ErrorMessage = ""
 	task.NextRetryAt = nil
+	task.Trace = append([]StepTrace(nil), input.Trace...)
 	task.CompletedAt = &now
 	s.items[input.TaskID] = task
 	return task, nil
@@ -244,6 +260,7 @@ func (s *InMemoryService) Fail(_ context.Context, input FailInput) (Task, error)
 	task.BlockerMessage = input.BlockerMessage
 	task.ErrorMessage = input.Error
 	task.NextRetryAt = nil
+	task.Trace = append([]StepTrace(nil), input.Trace...)
 	task.CompletedAt = &now
 	s.items[input.TaskID] = task
 	return task, nil

@@ -64,11 +64,11 @@ func (s *PostgresService) Create(ctx context.Context, input CreateInput) (Task, 
 
 	row := s.pool.QueryRow(ctx, `
 INSERT INTO tasks (
-	id, source_task_id, session_id, url, goal, actions, status, attempt, max_retries,
+	id, source_task_id, session_id, url, goal, actions, trace, status, attempt, max_retries,
 	next_retry_at, node_id, page_title, final_url, screenshot_base64,
 	screenshot_artifact_url, blocker_type, blocker_message, error_message, created_at, started_at, completed_at
 ) VALUES (
-	$1, $2, $3, $4, $5, $6::jsonb, $7, 0, $8,
+	$1, $2, $3, $4, $5, $6::jsonb, '[]'::jsonb, $7, 0, $8,
 	NULL, NULL, NULL, NULL, NULL,
 	NULL, NULL, NULL, NULL, $9, NULL, NULL
 )
@@ -91,6 +91,7 @@ SET
 	error_message = '',
 	blocker_type = NULL,
 	blocker_message = NULL,
+	trace = '[]'::jsonb,
 	completed_at = NULL
 WHERE id = $1 AND status = $5
 RETURNING `+taskColumns,
@@ -124,7 +125,8 @@ SET
 	next_retry_at = $3,
 	error_message = $4,
 	blocker_type = NULL,
-	blocker_message = NULL
+	blocker_message = NULL,
+	trace = '[]'::jsonb
 WHERE id = $1
 RETURNING `+taskColumns,
 		input.TaskID,
@@ -145,6 +147,10 @@ RETURNING `+taskColumns,
 
 func (s *PostgresService) Complete(ctx context.Context, input CompleteInput) (Task, error) {
 	now := normalizeTime(input.Completed)
+	traceJSON, err := json.Marshal(input.Trace)
+	if err != nil {
+		return Task{}, fmt.Errorf("marshal trace: %w", err)
+	}
 	row := s.pool.QueryRow(ctx, `
 UPDATE tasks
 SET
@@ -154,11 +160,12 @@ SET
 	final_url = $5,
 	screenshot_base64 = $6,
 	screenshot_artifact_url = $7,
+	trace = $8::jsonb,
 	error_message = '',
 	blocker_type = NULL,
 	blocker_message = NULL,
 	next_retry_at = NULL,
-	completed_at = $8
+	completed_at = $9
 WHERE id = $1
 RETURNING `+taskColumns,
 		input.TaskID,
@@ -168,6 +175,7 @@ RETURNING `+taskColumns,
 		nullableString(input.FinalURL),
 		nullableString(input.ScreenshotBase64),
 		nullableString(input.ScreenshotArtifactURL),
+		traceJSON,
 		now,
 	)
 
@@ -183,6 +191,10 @@ RETURNING `+taskColumns,
 
 func (s *PostgresService) Fail(ctx context.Context, input FailInput) (Task, error) {
 	now := normalizeTime(input.Completed)
+	traceJSON, err := json.Marshal(input.Trace)
+	if err != nil {
+		return Task{}, fmt.Errorf("marshal trace: %w", err)
+	}
 	row := s.pool.QueryRow(ctx, `
 UPDATE tasks
 SET
@@ -195,8 +207,9 @@ SET
 	blocker_type = $8,
 	blocker_message = $9,
 	error_message = $10,
+	trace = $11::jsonb,
 	next_retry_at = NULL,
-	completed_at = $11
+	completed_at = $12
 WHERE id = $1
 RETURNING `+taskColumns,
 		input.TaskID,
@@ -209,6 +222,7 @@ RETURNING `+taskColumns,
 		nullableString(input.BlockerType),
 		nullableString(input.BlockerMessage),
 		input.Error,
+		traceJSON,
 		now,
 	)
 
@@ -342,6 +356,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 	url TEXT NOT NULL,
 	goal TEXT NOT NULL,
 	actions JSONB NOT NULL DEFAULT '[]'::jsonb,
+	trace JSONB NOT NULL DEFAULT '[]'::jsonb,
 	status TEXT NOT NULL,
 	attempt INTEGER NOT NULL DEFAULT 0,
 	max_retries INTEGER NOT NULL DEFAULT 0,
@@ -360,6 +375,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 `,
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source_task_id TEXT NULL;`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS trace JSONB NOT NULL DEFAULT '[]'::jsonb;`,
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS max_retries INTEGER NOT NULL DEFAULT 0;`,
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ NULL;`,
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS screenshot_artifact_url TEXT NULL;`,
@@ -406,6 +422,7 @@ session_id,
 url,
 goal,
 actions,
+trace,
 status,
 attempt,
 max_retries,
@@ -425,6 +442,7 @@ completed_at`
 func scanTask(row rowScanner) (Task, error) {
 	var item Task
 	var actionsJSON []byte
+	var traceJSON []byte
 	var sourceTaskID *string
 	var nextRetryAt *time.Time
 	var nodeID *string
@@ -445,6 +463,7 @@ func scanTask(row rowScanner) (Task, error) {
 		&item.URL,
 		&item.Goal,
 		&actionsJSON,
+		&traceJSON,
 		&item.Status,
 		&item.Attempt,
 		&item.MaxRetries,
@@ -468,6 +487,11 @@ func scanTask(row rowScanner) (Task, error) {
 	if len(actionsJSON) > 0 {
 		if err := json.Unmarshal(actionsJSON, &item.Actions); err != nil {
 			return Task{}, fmt.Errorf("decode task actions: %w", err)
+		}
+	}
+	if len(traceJSON) > 0 {
+		if err := json.Unmarshal(traceJSON, &item.Trace); err != nil {
+			return Task{}, fmt.Errorf("decode task trace: %w", err)
 		}
 	}
 

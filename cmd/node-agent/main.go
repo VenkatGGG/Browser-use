@@ -73,11 +73,31 @@ type executeAction struct {
 }
 
 type executeResponse struct {
-	PageTitle        string `json:"page_title"`
-	FinalURL         string `json:"final_url"`
-	ScreenshotBase64 string `json:"screenshot_base64"`
-	BlockerType      string `json:"blocker_type,omitempty"`
-	BlockerMessage   string `json:"blocker_message,omitempty"`
+	PageTitle        string             `json:"page_title"`
+	FinalURL         string             `json:"final_url"`
+	ScreenshotBase64 string             `json:"screenshot_base64"`
+	BlockerType      string             `json:"blocker_type,omitempty"`
+	BlockerMessage   string             `json:"blocker_message,omitempty"`
+	Trace            []executeTraceStep `json:"trace,omitempty"`
+}
+
+type executeTraceStep struct {
+	Index       int           `json:"index"`
+	Action      executeAction `json:"action"`
+	Status      string        `json:"status"`
+	Error       string        `json:"error,omitempty"`
+	StartedAt   time.Time     `json:"started_at,omitempty"`
+	CompletedAt time.Time     `json:"completed_at,omitempty"`
+	DurationMS  int64         `json:"duration_ms,omitempty"`
+}
+
+type executeFlowError struct {
+	message string
+	result  executeResponse
+}
+
+func (e *executeFlowError) Error() string {
+	return e.message
 }
 
 type browserExecutor struct {
@@ -156,7 +176,10 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 		}
 	}
 
+	trace := make([]executeTraceStep, 0, len(actions))
+
 	if blocked, response := e.detectBlocker(runCtx, client); blocked {
+		response.Trace = append([]executeTraceStep(nil), trace...)
 		return response, nil
 	}
 
@@ -177,12 +200,46 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 	}
 
 	for index, action := range executionActions {
-		if err := e.applyAction(runCtx, client, action); err != nil {
-			return executeResponse{}, fmt.Errorf("action %d (%s) failed: %w", index+1, action.Type, err)
+		started := time.Now().UTC()
+		step := executeTraceStep{
+			Index:     index + 1,
+			Action:    normalizeTraceAction(action),
+			Status:    "succeeded",
+			StartedAt: started,
 		}
+		if err := e.applyAction(runCtx, client, action); err != nil {
+			finished := time.Now().UTC()
+			step.Status = "failed"
+			step.Error = err.Error()
+			step.CompletedAt = finished
+			step.DurationMS = finished.Sub(started).Milliseconds()
+			trace = append(trace, step)
+
+			partial := executeResponse{
+				Trace: append([]executeTraceStep(nil), trace...),
+			}
+			if title, evalErr := client.EvaluateString(runCtx, "document.title"); evalErr == nil {
+				partial.PageTitle = title
+			}
+			if finalURL, evalErr := client.EvaluateString(runCtx, "window.location.href"); evalErr == nil {
+				partial.FinalURL = finalURL
+			}
+			if screenshot, shotErr := client.CaptureScreenshot(runCtx); shotErr == nil {
+				partial.ScreenshotBase64 = screenshot
+			}
+			return partial, &executeFlowError{
+				message: fmt.Sprintf("action %d (%s) failed: %v", index+1, action.Type, err),
+				result:  partial,
+			}
+		}
+		finished := time.Now().UTC()
+		step.CompletedAt = finished
+		step.DurationMS = finished.Sub(started).Milliseconds()
+		trace = append(trace, step)
 	}
 
 	if blocked, response := e.detectBlocker(runCtx, client); blocked {
+		response.Trace = append([]executeTraceStep(nil), trace...)
 		return response, nil
 	}
 
@@ -203,6 +260,7 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 		PageTitle:        title,
 		FinalURL:         finalURL,
 		ScreenshotBase64: screenshot,
+		Trace:            append([]executeTraceStep(nil), trace...),
 	}, nil
 }
 
@@ -401,6 +459,17 @@ func summarizeActions(actions []executeAction) string {
 		parts = append(parts, label)
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func normalizeTraceAction(action executeAction) executeAction {
+	return executeAction{
+		Type:      strings.ToLower(strings.TrimSpace(action.Type)),
+		Selector:  strings.TrimSpace(action.Selector),
+		Text:      strings.TrimSpace(action.Text),
+		Pixels:    action.Pixels,
+		TimeoutMS: action.TimeoutMS,
+		DelayMS:   action.DelayMS,
+	}
 }
 
 func main() {

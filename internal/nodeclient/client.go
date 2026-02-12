@@ -20,6 +20,16 @@ type Action struct {
 	DelayMS   int    `json:"delay_ms,omitempty"`
 }
 
+type StepTrace struct {
+	Index       int       `json:"index"`
+	Action      Action    `json:"action"`
+	Status      string    `json:"status"`
+	Error       string    `json:"error,omitempty"`
+	StartedAt   time.Time `json:"started_at,omitempty"`
+	CompletedAt time.Time `json:"completed_at,omitempty"`
+	DurationMS  int64     `json:"duration_ms,omitempty"`
+}
+
 type ExecuteInput struct {
 	TaskID  string   `json:"task_id"`
 	URL     string   `json:"url"`
@@ -28,11 +38,24 @@ type ExecuteInput struct {
 }
 
 type ExecuteOutput struct {
-	PageTitle        string `json:"page_title"`
-	FinalURL         string `json:"final_url"`
-	ScreenshotBase64 string `json:"screenshot_base64"`
-	BlockerType      string `json:"blocker_type,omitempty"`
-	BlockerMessage   string `json:"blocker_message,omitempty"`
+	PageTitle        string      `json:"page_title"`
+	FinalURL         string      `json:"final_url"`
+	ScreenshotBase64 string      `json:"screenshot_base64"`
+	BlockerType      string      `json:"blocker_type,omitempty"`
+	BlockerMessage   string      `json:"blocker_message,omitempty"`
+	Trace            []StepTrace `json:"trace,omitempty"`
+}
+
+type ExecutionError struct {
+	Message string
+	Output  ExecuteOutput
+}
+
+func (e *ExecutionError) Error() string {
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	return "node execution failed"
 }
 
 type Client interface {
