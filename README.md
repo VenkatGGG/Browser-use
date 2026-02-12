@@ -80,7 +80,8 @@ Local-first orchestration infrastructure for AI browser automation.
   - extract page title + final URL
 - Task lifecycle is tracked:
   - `queued -> running -> completed|failed`
-- `POST /v1/tasks` returns immediately (`202 Accepted`); use `GET /v1/tasks/{id}` for progress/result.
+- `POST /v1/tasks` returns immediately (`202 Accepted`) by default; use `GET /v1/tasks/{id}` for progress/result.
+- `POST /task` defaults to wait for terminal state and returns final task payload (`200 OK`) unless `wait_for_completion` is explicitly set to `false`.
 - `POST /v1/tasks/{id}/replay` clones an existing task and re-queues it (supports optional `session_id` or `create_new_session` + `tenant_id`, `max_retries` overrides, and tracks lineage via `source_task_id`).
 - `GET /v1/tasks/{id}/replay_chain` returns replay lineage (task -> parent -> root).
 - `GET /v1/tasks/{id}/replays` returns direct replay children for a task.
@@ -158,7 +159,7 @@ curl -sS -X POST http://localhost:8080/v1/tasks \\
 ```bash
 curl -sS -X POST http://localhost:8080/task \\
   -H 'Content-Type: application/json' \\
-  -d '{"url":"https://example.com","goal":"open page and capture screenshot","wait_for_completion":true}'
+  -d '{"url":"https://example.com","goal":"open page and capture screenshot"}'
 ```
 
 Optional (safe retries): add idempotency key for create operations:
@@ -186,7 +187,7 @@ curl -sS -X POST http://localhost:8080/v1/tasks \\
   }'
 ```
 
-Optional synchronous mode (wait for terminal status and return `trace` + artifacts directly):
+Optional async mode for `/task` (return `202 Accepted` immediately):
 ```bash
 curl -sS -X POST http://localhost:8080/task \\
   -H 'Content-Type: application/json' \\
@@ -194,8 +195,7 @@ curl -sS -X POST http://localhost:8080/task \\
     "session_id":"sess_000001",
     "url":"https://duckduckgo.com",
     "goal":"search for browser use",
-    "wait_for_completion": true,
-    "wait_timeout_ms": 90000
+    "wait_for_completion": false
   }'
 ```
 

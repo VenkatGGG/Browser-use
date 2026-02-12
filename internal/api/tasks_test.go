@@ -114,7 +114,7 @@ func TestCreateTaskLegacyAliasQueued(t *testing.T) {
 		nil,
 	)
 
-	body := []byte(`{"session_id":"sess_legacy","url":"https://example.com","goal":"open"}`)
+	body := []byte(`{"session_id":"sess_legacy","url":"https://example.com","goal":"open","wait_for_completion":false}`)
 	req := httptest.NewRequest(http.MethodPost, "/task", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -148,7 +148,7 @@ func TestCreateTaskAutoCreatesSessionWhenMissing(t *testing.T) {
 		nil,
 	)
 
-	body := []byte(`{"url":"https://example.com","goal":"open"}`)
+	body := []byte(`{"url":"https://example.com","goal":"open","wait_for_completion":false}`)
 	req := httptest.NewRequest(http.MethodPost, "/task", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -164,6 +164,62 @@ func TestCreateTaskAutoCreatesSessionWhenMissing(t *testing.T) {
 	}
 	if !strings.HasPrefix(created.SessionID, "sess_") {
 		t.Fatalf("expected auto-created session id, got %q", created.SessionID)
+	}
+}
+
+func TestTaskAliasDefaultsToSynchronousWait(t *testing.T) {
+	svc := task.NewInMemoryService()
+	dispatcher := &immediateCompleteDispatcher{svc: svc}
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	body := []byte(`{"url":"https://example.com","goal":"open"}`)
+	req := httptest.NewRequest(http.MethodPost, "/task", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for /task default synchronous mode, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var found task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &found); err != nil {
+		t.Fatalf("decode task response: %v", err)
+	}
+	if found.Status != task.StatusCompleted {
+		t.Fatalf("expected completed task in sync mode, got %s", found.Status)
+	}
+}
+
+func TestV1TasksDefaultsToAsyncMode(t *testing.T) {
+	svc := task.NewInMemoryService()
+	dispatcher := &immediateCompleteDispatcher{svc: svc}
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	body := []byte(`{"session_id":"sess_1","url":"https://example.com","goal":"open"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for /v1/tasks default async mode, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 

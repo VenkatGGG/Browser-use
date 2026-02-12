@@ -33,7 +33,7 @@ type createTaskRequest struct {
 	Goal              string              `json:"goal"`
 	Actions           []taskActionRequest `json:"actions,omitempty"`
 	MaxRetries        *int                `json:"max_retries,omitempty"`
-	WaitForCompletion bool                `json:"wait_for_completion,omitempty"`
+	WaitForCompletion *bool               `json:"wait_for_completion,omitempty"`
 	WaitTimeoutMS     int                 `json:"wait_timeout_ms,omitempty"`
 }
 
@@ -49,7 +49,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		s.listRecentTasks(w, r)
 	case http.MethodPost:
-		s.createAndQueueTask(w, r)
+		s.createAndQueueTask(w, r, false)
 	default:
 		httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	}
@@ -61,7 +61,7 @@ func (s *Server) handleTaskAlias(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
-	s.createAndQueueTask(w, r)
+	s.createAndQueueTask(w, r, true)
 }
 
 // handleTaskAliasByID keeps Phase-0 compatibility for GET /tasks/{id}.
@@ -145,16 +145,16 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func (s *Server) createAndQueueTask(w http.ResponseWriter, r *http.Request) {
+func (s *Server) createAndQueueTask(w http.ResponseWriter, r *http.Request, defaultWaitForCompletion bool) {
 	if s.handleIdempotentRequest(w, r, "tasks:create", func(resp http.ResponseWriter) {
-		s.createAndQueueTaskNonIdempotent(resp, r)
+		s.createAndQueueTaskNonIdempotent(resp, r, defaultWaitForCompletion)
 	}) {
 		return
 	}
-	s.createAndQueueTaskNonIdempotent(w, r)
+	s.createAndQueueTaskNonIdempotent(w, r, defaultWaitForCompletion)
 }
 
-func (s *Server) createAndQueueTaskNonIdempotent(w http.ResponseWriter, r *http.Request) {
+func (s *Server) createAndQueueTaskNonIdempotent(w http.ResponseWriter, r *http.Request, defaultWaitForCompletion bool) {
 	var req createTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_json", "request body must be valid JSON")
@@ -191,7 +191,12 @@ func (s *Server) createAndQueueTaskNonIdempotent(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if req.WaitForCompletion {
+	waitForCompletion := defaultWaitForCompletion
+	if req.WaitForCompletion != nil {
+		waitForCompletion = *req.WaitForCompletion
+	}
+
+	if waitForCompletion {
 		timeout := normalizedWaitTimeout(req.WaitTimeoutMS)
 		if completed, done := s.waitForTaskTerminalState(r.Context(), created.ID, timeout); done {
 			httpx.WriteJSON(w, http.StatusOK, completed)
