@@ -1469,6 +1469,10 @@
       const directReplayState = state.directReplays[task.id || ""];
       const directReplayCount = directReplaySummary(directReplayState);
       const directReplayIDs = directReplayLinks(directReplayState);
+      const cancelable = isTaskCancelable(task);
+      const cancelButton = cancelable
+        ? '<button type="button" class="btn btn-danger" id="cancel-task-btn">Cancel Task</button>'
+        : '';
 
       taskDetailEl.innerHTML = (
         '<div class="detail-header">' +
@@ -1476,7 +1480,7 @@
             '<div class="detail-id">' + escapeHTML(task.id || '-') + '</div>' +
             '<span class="pill ' + statusPillClass(task.status) + '">' + escapeHTML(task.status || 'unknown') + '</span>' +
           '</div>' +
-          '<div class="panel-note">Selected task details and replay controls.</div>' +
+          '<div class="panel-note">Selected task details with replay and cancellation controls.</div>' +
         '</div>' +
         '<div class="detail-list">' +
           '<div class="pair"><span class="k">Goal</span><span class="v">' + escapeHTML(task.goal || '-') + '</span></div>' +
@@ -1502,6 +1506,7 @@
           '<button type="button" class="btn btn-primary" id="replay-btn">Replay Task</button>' +
           '<button type="button" class="btn btn-secondary" id="replay-fresh-btn">Replay New Session</button>' +
           artifactButton +
+          cancelButton +
           '<button type="button" class="btn btn-danger" id="clear-selection-btn">Clear Selection</button>' +
         '</div>'
       );
@@ -1514,6 +1519,11 @@
       const replayFreshBtn = document.getElementById('replay-fresh-btn');
       if (replayFreshBtn) {
         replayFreshBtn.addEventListener('click', () => replayTask(task, { freshSession: true }));
+      }
+
+      const cancelTaskBtn = document.getElementById('cancel-task-btn');
+      if (cancelTaskBtn) {
+        cancelTaskBtn.addEventListener('click', () => cancelTask(task, cancelTaskBtn));
       }
 
       const clearBtn = document.getElementById('clear-selection-btn');
@@ -1720,6 +1730,36 @@
         await refreshDashboard();
       } catch (error) {
         createStatusEl.textContent = 'Replay failed: ' + error.message;
+      }
+    }
+
+    function isTaskCancelable(task) {
+      const status = String(task && task.status || '').trim().toLowerCase();
+      return status === 'queued' || status === 'running';
+    }
+
+    async function cancelTask(task, button) {
+      if (!task || !task.id) return;
+      const original = button ? button.textContent : "";
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Canceling...";
+      }
+      try {
+        createStatusEl.textContent = 'Canceling task ' + task.id + '...';
+        const canceled = await requestJSON('/v1/tasks/' + encodeURIComponent(task.id) + '/cancel', {
+          method: 'POST'
+        });
+        state.selectedTaskID = canceled.id || task.id;
+        createStatusEl.innerHTML = 'Task <span class="mono">' + escapeHTML(canceled.id || task.id) + '</span> canceled.';
+        await refreshDashboard();
+      } catch (error) {
+        createStatusEl.textContent = 'Cancel failed: ' + error.message;
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = original || "Cancel Task";
+        }
       }
     }
 

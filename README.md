@@ -86,6 +86,7 @@ Local-first orchestration infrastructure for AI browser automation.
 - `POST /v1/tasks` returns immediately (`202 Accepted`) by default; use `GET /v1/tasks/{id}` for progress/result.
 - `POST /task` defaults to wait for terminal state and returns final task payload (`200 OK`) unless `wait_for_completion` is explicitly set to `false`.
 - `POST /v1/tasks/{id}/replay` clones an existing task and re-queues it (supports optional `session_id` or `create_new_session` + `tenant_id`, `max_retries` overrides, and tracks lineage via `source_task_id`).
+- `POST /v1/tasks/{id}/cancel` cancels queued or running tasks (running executions are interrupted by the runner).
 - `GET /v1/tasks/{id}/replay_chain` returns replay lineage (task -> parent -> root).
 - `GET /v1/tasks/{id}/replays` returns direct replay children for a task.
 - Completed tasks store screenshots as artifacts and expose `screenshot_artifact_url`.
@@ -140,6 +141,7 @@ Local-first orchestration infrastructure for AI browser automation.
   - filtered task feed (status/search/artifact/failure/blocker/sort)
   - blocker-aware task table column + blocker KPIs (count and rate)
   - selectable task detail panel with metadata, lineage jump-to-source, action JSON, and replay
+  - task cancellation action for queued/running tasks directly from task detail
   - screenshot artifact preview modal and failure triage list
   - task submission form with reusable presets (session creation + queue task)
   - embedded HTML asset at `internal/api/assets/dashboard.html`
