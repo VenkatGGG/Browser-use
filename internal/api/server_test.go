@@ -195,8 +195,8 @@ func TestDashboardRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read dashboard body: %v", err)
 	}
-	if !strings.Contains(string(body), "Browser Use Control Room") {
-		t.Fatalf("dashboard response missing expected title")
+	if !strings.Contains(string(body), "Dashboard build not found") {
+		t.Fatalf("dashboard fallback response missing expected message")
 	}
 }
 

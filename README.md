@@ -156,7 +156,7 @@ Local-first orchestration infrastructure for AI browser automation.
   - Redux handles local UI state (filters/selection/polling settings)
   - TanStack Query handles server state (polling/caching/mutations for tasks/nodes/stats)
   - backend API routes remain unchanged (`/v1/*`)
-  - `/dashboard` now serves `web/dist/index.html` when a built frontend is available (or when `ORCHESTRATOR_DASHBOARD_DIST` is set); embedded dashboard remains fallback
+  - `/dashboard` now serves `web/dist/index.html` when a built frontend is available (or when `ORCHESTRATOR_DASHBOARD_DIST` is set); non-built environments show a minimal fallback page with build instructions
 
 ## Quick start
 
