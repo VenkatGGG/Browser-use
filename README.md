@@ -151,6 +151,11 @@ Local-first orchestration infrastructure for AI browser automation.
   - `GET /metrics`
   - task status totals, success/block rates, blocker totals, node state totals
   - optional window control: `GET /metrics?limit=1000`
+- Frontend split started:
+  - new TypeScript dashboard workspace in `web/` (React + Redux Toolkit + TanStack Query)
+  - Redux handles local UI state (filters/selection/polling settings)
+  - TanStack Query handles server state (polling/caching/mutations for tasks/nodes/stats)
+  - backend API routes remain unchanged (`/v1/*`)
 
 ## Quick start
 
@@ -294,6 +299,8 @@ make dev-pool        # infra + browser image + host-run orchestrator with warm p
 make clean-pool-nodes
 make soak-local      # enqueue/poll many tasks and print reliability summary
 make planner-eval    # run fixture-driven planner regression checks
+make ui-dev          # run separated TypeScript dashboard (Vite)
+make ui-build        # build separated TypeScript dashboard
 ```
 
 ## Notes

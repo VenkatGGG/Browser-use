@@ -1,0 +1,177 @@
+:root {
+  color-scheme: light;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: #f4efe7;
+  color: #1f2b30;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.header {
+  margin-bottom: 12px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.header p {
+  margin: 6px 0 0;
+  color: #53626a;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.controls label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #3e4e55;
+}
+
+.controls input,
+.controls select,
+.controls button {
+  border: 1px solid #d6ccc0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.kpis > div {
+  border: 1px solid #d6ccc0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 10px;
+}
+
+.tablePane,
+.detailPane {
+  border: 1px solid #d6ccc0;
+  border-radius: 10px;
+  background: #fff;
+  overflow: auto;
+}
+
+.tablePane table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tablePane th,
+.tablePane td {
+  text-align: left;
+  border-bottom: 1px solid #ece3d9;
+  padding: 8px 10px;
+  font-size: 12px;
+  vertical-align: top;
+}
+
+.tablePane th {
+  background: #fbf7f0;
+  position: sticky;
+  top: 0;
+}
+
+.tablePane tr.selected td {
+  background: #eaf4f3;
+}
+
+.pill {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.pill.queued {
+  background: #f3ead6;
+  color: #8a5e08;
+}
+.pill.running {
+  background: #d9ecff;
+  color: #0b5886;
+}
+.pill.completed {
+  background: #daf4e5;
+  color: #1f794d;
+}
+.pill.failed {
+  background: #f8ddd7;
+  color: #9b321a;
+}
+.pill.canceled {
+  background: #e9edf1;
+  color: #52606a;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.actions button {
+  border: 1px solid #d6ccc0;
+  border-radius: 7px;
+  background: #fff;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.actions button.danger {
+  background: #fff2ee;
+  border-color: #f2cabc;
+  color: #9b321a;
+}
+
+.detailPane {
+  padding: 12px;
+}
+
+.detailPane h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.detailPane p {
+  font-size: 12px;
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+

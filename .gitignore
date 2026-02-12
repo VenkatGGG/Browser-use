@@ -19,3 +19,7 @@ coverage.out
 .vscode/
 .idea/
 deploy/compose/.env
+
+# Frontend workspace
+web/node_modules/
+web/dist/

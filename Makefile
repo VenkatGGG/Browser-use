@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f deploy/compose/docker-compose.yml --env-file deploy/compose/.env
 
-.PHONY: up down logs ps test fmt proto run-orchestrator run-orchestrator-pool init-env preflight health infra-up infra-down build-browser-node-image dev-pool clean-pool-nodes soak-local planner-eval
+.PHONY: up down logs ps test fmt proto run-orchestrator run-orchestrator-pool init-env preflight health infra-up infra-down build-browser-node-image dev-pool clean-pool-nodes soak-local planner-eval ui-dev ui-build
 
 init-env:
 	@if [ ! -f deploy/compose/.env ]; then cp deploy/compose/.env.example deploy/compose/.env; fi
@@ -86,3 +86,9 @@ soak-local:
 
 planner-eval:
 	go test ./cmd/node-agent -run TestPlannerEvalFixtures -count=1 -v
+
+ui-dev:
+	cd web && npm run dev
+
+ui-build:
+	cd web && npm run build
