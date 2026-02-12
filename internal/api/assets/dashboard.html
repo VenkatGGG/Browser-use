@@ -383,6 +383,13 @@
       font-family: "IBM Plex Mono", monospace;
     }
 
+    .node-actions {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
     .pill {
       display: inline-flex;
       align-items: center;
@@ -1378,6 +1385,11 @@
               '<div>boot: ' + escapeHTML(fmtTime(node.booted_at)) + '</div>' +
               '<div>hb: ' + escapeHTML(fmtTime(node.last_heartbeat)) + '</div>' +
             '</div>' +
+            '<div class="node-actions">' +
+              '<button class="btn btn-secondary" type="button" data-node-action="drain" data-node-id="' + escapeHTML(node.id || '') + '">Drain</button>' +
+              '<button class="btn btn-secondary" type="button" data-node-action="activate" data-node-id="' + escapeHTML(node.id || '') + '">Activate</button>' +
+              '<button class="btn btn-danger" type="button" data-node-action="recycle" data-node-id="' + escapeHTML(node.id || '') + '">Recycle</button>' +
+            '</div>' +
           '</article>'
         );
       }).join('');
@@ -1650,6 +1662,31 @@
       return task;
     }
 
+    async function runNodeAction(nodeID, action, button) {
+      const id = String(nodeID || "").trim();
+      const op = String(action || "").trim();
+      if (!id || !op) return;
+      const original = button ? button.textContent : "";
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Working...";
+      }
+      try {
+        await requestJSON('/v1/nodes/' + encodeURIComponent(id) + '/' + encodeURIComponent(op), {
+          method: 'POST'
+        });
+        createStatusEl.textContent = 'Node ' + id + ' ' + op + ' request succeeded.';
+        await refreshDashboard();
+      } catch (error) {
+        createStatusEl.textContent = 'Node ' + id + ' ' + op + ' failed: ' + error.message;
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = original || op;
+        }
+      }
+    }
+
     async function replayTask(task, options) {
       const freshSession = Boolean(options && options.freshSession);
       const payload = {};
@@ -1865,6 +1902,19 @@
       });
 
       document.addEventListener('click', (event) => {
+        const nodeActionTarget = event.target.closest('[data-node-action][data-node-id]');
+        if (nodeActionTarget) {
+          const nodeID = nodeActionTarget.getAttribute('data-node-id');
+          const action = nodeActionTarget.getAttribute('data-node-action');
+          if (!nodeID || !action) return;
+          if (action === 'recycle') {
+            const yes = window.confirm('Recycle node ' + nodeID + '? This force-stops the current node.');
+            if (!yes) return;
+          }
+          void runNodeAction(nodeID, action, nodeActionTarget);
+          return;
+        }
+
         const artifactTarget = event.target.closest('[data-artifact]');
         if (artifactTarget) {
           event.preventDefault();
