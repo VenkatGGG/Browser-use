@@ -72,6 +72,62 @@ body {
   font-weight: 600;
 }
 
+.composePane {
+  border: 1px solid #d6ccc0;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.composePane h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.composeForm {
+  display: grid;
+  gap: 8px;
+}
+
+.composeForm label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #3e4e55;
+}
+
+.composeForm input,
+.composeForm textarea,
+.composeForm button {
+  border: 1px solid #d6ccc0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.composeForm textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.sessionRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.composeStatus {
+  margin-top: 8px;
+  border: 1px dashed #d6ccc0;
+  border-radius: 8px;
+  background: #fbf7f0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #4d5c64;
+}
+
 .layout {
   display: grid;
   grid-template-columns: 1fr 360px;
@@ -257,5 +313,102 @@ body {
 .traceTime {
   color: #4d5c64;
   margin-top: 4px;
+}
+
+.traceStep a,
+.traceStep button {
+  margin-top: 6px;
+  border: 1px solid #d6ccc0;
+  border-radius: 7px;
+  background: #fff;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  color: #2a556a;
+  text-decoration: none;
+}
+
+.failuresPane {
+  border: 1px solid #d6ccc0;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  margin-top: 10px;
+}
+
+.failuresPane h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.failureList {
+  display: grid;
+  gap: 8px;
+}
+
+.failureItem {
+  border: 1px solid #ecd3ca;
+  border-radius: 8px;
+  background: #fff5f1;
+  padding: 8px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.failureItem strong {
+  font-size: 12px;
+}
+
+.failureItem span {
+  font-size: 11px;
+  color: #4d5c64;
+}
+
+.failureError {
+  color: #9b321a !important;
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(19, 29, 36, 0.68);
+  display: grid;
+  place-items: center;
+  z-index: 30;
+  padding: 12px;
+}
+
+.modalCard {
+  width: min(1100px, 96vw);
+  max-height: 94vh;
+  border: 1px solid #d6ccc0;
+  border-radius: 10px;
+  background: #fff;
+  overflow: auto;
+  padding: 10px;
+}
+
+.modalHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.modalHead button {
+  border: 1px solid #d6ccc0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.modalCard img {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
 }
 

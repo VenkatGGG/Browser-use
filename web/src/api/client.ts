@@ -2,6 +2,7 @@ import type {
   DirectReplaysResponse,
   NodeItem,
   ReplayChainResponse,
+  SessionItem,
   TaskItem,
   TaskStats
 } from "./types";
@@ -59,6 +60,28 @@ export async function fetchDirectReplays(taskID: string): Promise<DirectReplaysR
 export async function runNodeAction(nodeID: string, action: "drain" | "activate" | "recycle"): Promise<NodeItem> {
   return requestJSON<NodeItem>(`/v1/nodes/${encodeURIComponent(nodeID)}/${encodeURIComponent(action)}`, {
     method: "POST"
+  });
+}
+
+export async function createSession(tenantID: string): Promise<SessionItem> {
+  return requestJSON<SessionItem>("/v1/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tenant_id: tenantID })
+  });
+}
+
+export async function createTask(input: {
+  session_id: string;
+  url: string;
+  goal: string;
+  max_retries?: number;
+  actions?: Array<Record<string, unknown>>;
+}): Promise<TaskItem> {
+  return requestJSON<TaskItem>("/v1/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
   });
 }
 

@@ -1,7 +1,9 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelTask,
+  createSession,
+  createTask,
   fetchDirectReplays,
   fetchNodes,
   fetchReplayChain,
@@ -63,6 +65,14 @@ export function App() {
   const dispatch = useAppDispatch();
   const queryClient = useQueryClient();
   const ui = useAppSelector((state) => state.ui);
+  const [tenantID, setTenantID] = useState("dashboard");
+  const [sessionID, setSessionID] = useState("");
+  const [taskURL, setTaskURL] = useState("https://duckduckgo.com");
+  const [taskGoal, setTaskGoal] = useState("search for browser use");
+  const [taskRetries, setTaskRetries] = useState(1);
+  const [taskActionsJSON, setTaskActionsJSON] = useState("");
+  const [composeStatus, setComposeStatus] = useState("No task submitted yet.");
+  const [previewImageURL, setPreviewImageURL] = useState("");
 
   const nodesQuery = useQuery({
     queryKey: ["nodes"],
@@ -100,6 +110,28 @@ export function App() {
     mutationFn: ({ id, action }: { id: string; action: "drain" | "activate" | "recycle" }) => runNodeAction(id, action),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["nodes"] });
+    }
+  });
+  const createSessionMutation = useMutation({
+    mutationFn: (tenant: string) => createSession(tenant),
+    onSuccess: (session) => {
+      setSessionID(session.id);
+      setComposeStatus(`Created session ${session.id}`);
+    },
+    onError: (error) => {
+      setComposeStatus(`Create session failed: ${(error as Error).message}`);
+    }
+  });
+  const createTaskMutation = useMutation({
+    mutationFn: createTask,
+    onSuccess: (created) => {
+      dispatch(setSelectedTaskID(created.id));
+      setComposeStatus(`Queued task ${created.id} (${created.status}).`);
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      void queryClient.invalidateQueries({ queryKey: ["task-stats"] });
+    },
+    onError: (error) => {
+      setComposeStatus(`Task queue failed: ${(error as Error).message}`);
     }
   });
 
@@ -172,6 +204,54 @@ export function App() {
   const nodes = nodesQuery.data ?? [];
   const replayChainIDs = (replayChainQuery.data?.tasks ?? []).map((item) => item.id).filter(Boolean);
   const directReplayIDs = (directReplaysQuery.data?.tasks ?? []).map((item) => item.id).filter(Boolean);
+  const failures = useMemo(
+    () => tasks.filter((task) => String(task.status).toLowerCase() === "failed").slice(0, 8),
+    [tasks]
+  );
+
+  async function ensureSession(): Promise<string> {
+    const existing = sessionID.trim();
+    if (existing) return existing;
+    const created = await createSession(tenantID.trim() || "dashboard");
+    setSessionID(created.id);
+    return created.id;
+  }
+
+  async function onSubmitTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const url = taskURL.trim();
+    if (!url) {
+      setComposeStatus("URL is required.");
+      return;
+    }
+    const goal = taskGoal.trim();
+    let actions: Array<Record<string, unknown>> | undefined;
+    const raw = taskActionsJSON.trim();
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) {
+          throw new Error("actions must be a JSON array");
+        }
+        actions = parsed as Array<Record<string, unknown>>;
+      } catch (error) {
+        setComposeStatus(`Invalid actions JSON: ${(error as Error).message}`);
+        return;
+      }
+    }
+    try {
+      const sid = await ensureSession();
+      createTaskMutation.mutate({
+        session_id: sid,
+        url,
+        goal,
+        max_retries: taskRetries,
+        actions
+      });
+    } catch (error) {
+      setComposeStatus(`Task queue failed: ${(error as Error).message}`);
+    }
+  }
 
   return (
     <main className="page">
@@ -230,6 +310,59 @@ export function App() {
         <div>Completed: {statusCounts.completed ?? 0}</div>
         <div>Failed: {statusCounts.failed ?? 0}</div>
         <div>Canceled: {statusCounts.canceled ?? 0}</div>
+      </section>
+
+      <section className="composePane">
+        <h2>Create Task</h2>
+        <form className="composeForm" onSubmit={onSubmitTask}>
+          <label>
+            Tenant ID
+            <input value={tenantID} onChange={(e) => setTenantID(e.target.value)} />
+          </label>
+          <div className="sessionRow">
+            <label>
+              Session ID
+              <input value={sessionID} onChange={(e) => setSessionID(e.target.value)} placeholder="sess_..." />
+            </label>
+            <button
+              type="button"
+              onClick={() => createSessionMutation.mutate(tenantID.trim() || "dashboard")}
+              disabled={createSessionMutation.isPending}
+            >
+              {createSessionMutation.isPending ? "Creating..." : "Create Session"}
+            </button>
+          </div>
+          <label>
+            URL
+            <input value={taskURL} onChange={(e) => setTaskURL(e.target.value)} />
+          </label>
+          <label>
+            Goal
+            <input value={taskGoal} onChange={(e) => setTaskGoal(e.target.value)} />
+          </label>
+          <label>
+            Max Retries
+            <input
+              type="number"
+              min={0}
+              max={10}
+              value={taskRetries}
+              onChange={(e) => setTaskRetries(Number(e.target.value) || 0)}
+            />
+          </label>
+          <label>
+            Actions JSON (optional)
+            <textarea
+              value={taskActionsJSON}
+              onChange={(e) => setTaskActionsJSON(e.target.value)}
+              placeholder='[{"type":"wait_for","selector":"input[name=\"q\"]","timeout_ms":8000}]'
+            />
+          </label>
+          <button type="submit" disabled={createTaskMutation.isPending}>
+            {createTaskMutation.isPending ? "Queuing..." : "Queue Task"}
+          </button>
+        </form>
+        <div className="composeStatus">{composeStatus}</div>
       </section>
 
       <section className="nodesPane">
@@ -381,9 +514,9 @@ export function App() {
                           start: {fmt(step.started_at)} | end: {fmt(step.completed_at)} | duration: {step.duration_ms ?? 0}ms
                         </div>
                         {step.screenshot_artifact_url ? (
-                          <a href={step.screenshot_artifact_url} target="_blank" rel="noreferrer">
+                          <button type="button" onClick={() => setPreviewImageURL(step.screenshot_artifact_url || "")}>
                             screenshot
-                          </a>
+                          </button>
                         ) : null}
                       </li>
                     ))}
@@ -398,6 +531,42 @@ export function App() {
           )}
         </aside>
       </section>
+
+      <section className="failuresPane">
+        <h2>Recent Failures</h2>
+        {failures.length ? (
+          <div className="failureList">
+            {failures.map((task) => (
+              <button
+                key={task.id}
+                className="failureItem"
+                type="button"
+                onClick={() => dispatch(setSelectedTaskID(task.id))}
+              >
+                <strong>{task.id}</strong>
+                <span>{compact(task.goal, 120)}</span>
+                <span className="failureError">{compact(task.error_message || "-", 160)}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p>No failed tasks in the current window.</p>
+        )}
+      </section>
+
+      {previewImageURL ? (
+        <div className="modalOverlay" onClick={() => setPreviewImageURL("")}>
+          <div className="modalCard" onClick={(event) => event.stopPropagation()}>
+            <div className="modalHead">
+              <strong>Screenshot Preview</strong>
+              <button type="button" onClick={() => setPreviewImageURL("")}>
+                Close
+              </button>
+            </div>
+            <img src={previewImageURL} alt="Task screenshot preview" />
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

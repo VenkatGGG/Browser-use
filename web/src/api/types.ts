@@ -82,3 +82,9 @@ export interface DirectReplaysResponse {
   count?: number;
 }
 
+export interface SessionItem {
+  id: string;
+  tenant_id: string;
+  created_at?: string;
+}
+
