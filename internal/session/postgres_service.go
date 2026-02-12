@@ -65,7 +65,7 @@ func (s *PostgresService) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	if result.RowsAffected() == 0 {
-		return errors.New("session not found")
+		return ErrSessionNotFound
 	}
 	return nil
 }
@@ -104,7 +104,7 @@ func scanSession(row sessionRowScanner) (Session, error) {
 	err := row.Scan(&out.ID, &out.TenantID, &status, &out.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Session{}, errors.New("session not found")
+			return Session{}, ErrSessionNotFound
 		}
 		return Session{}, err
 	}

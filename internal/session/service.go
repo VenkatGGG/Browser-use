@@ -15,6 +15,8 @@ const (
 	StatusReady Status = "ready"
 )
 
+var ErrSessionNotFound = errors.New("session not found")
+
 type Session struct {
 	ID        string    `json:"id"`
 	TenantID  string    `json:"tenant_id"`
@@ -65,7 +67,7 @@ func (s *InMemoryService) Delete(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.items[id]; !ok {
-		return errors.New("session not found")
+		return ErrSessionNotFound
 	}
 	delete(s.items, id)
 	return nil
