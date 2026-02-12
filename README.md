@@ -128,6 +128,9 @@ Local-first orchestration infrastructure for AI browser automation.
   - extraction-type hints (`price`, `rating`, `title`) with lightweight validation before accepting output
 - Task records now persist execution trace steps (`trace`) including action payload, step status, timing, and failure reason when available.
 - Optional trace step screenshots can be enabled with `NODE_AGENT_TRACE_SCREENSHOTS=true` (or `ORCHESTRATOR_POOL_NODE_TRACE_SCREENSHOTS=true` for managed warm-pool nodes).
+- Added fixture-driven planner regression harness:
+  - planner eval fixtures in `cmd/node-agent/testdata/planner_eval_cases.json`
+  - run with `make planner-eval` (or `go test ./cmd/node-agent -run TestPlannerEvalFixtures -count=1 -v`)
 
 ### Phase 4 started (dashboard)
 - Orchestrator now serves a live dashboard at `GET /dashboard`.
@@ -286,6 +289,7 @@ make run-orchestrator-pool
 make dev-pool        # infra + browser image + host-run orchestrator with warm pool
 make clean-pool-nodes
 make soak-local      # enqueue/poll many tasks and print reliability summary
+make planner-eval    # run fixture-driven planner regression checks
 ```
 
 ## Notes
@@ -307,6 +311,7 @@ make soak-local      # enqueue/poll many tasks and print reliability summary
 - Node-agent now detects blocker pages (captcha/human verification/form validation), returns structured blocker metadata, and runner persists blocker evidence on failed tasks without retry loops.
 - Node-agent now performs a short blocker re-check for likely transient anti-bot interstitials (for example Cloudflare "checking your browser") before classifying a task as blocked.
 - Planner fallback behavior is now explicitly logged (planner mode, fallback planner, cause, and action count) for easier debugging of endpoint/OpenAI planner failures.
+- Planner quality regression checks are available via fixture-driven eval tests (`make planner-eval`).
 - Runner applies per-domain cooldowns after challenge blockers (`human_verification_required` / `bot_blocked`) to fail subsequent tasks fast until cooldown expires.
 - Task create and replay flows now validate provided `session_id` values against the session store and reject unknown sessions.
 - Warm-pool manager is currently feature-flagged and intended for host-run orchestrator mode (`make run-orchestrator`) where `docker` CLI is available; compose mode keeps static node service by default.

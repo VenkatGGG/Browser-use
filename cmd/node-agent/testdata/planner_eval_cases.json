@@ -1,0 +1,104 @@
+[
+  {
+    "name": "heuristic_search_duckduckgo",
+    "planner_mode": "heuristic",
+    "goal": "search for browser automation",
+    "snapshot": {
+      "url": "https://duckduckgo.com",
+      "title": "DuckDuckGo",
+      "elements": [
+        {
+          "tag": "input",
+          "type": "search",
+          "name": "q",
+          "selector": "input[name='q']",
+          "width": 560,
+          "height": 40
+        }
+      ]
+    },
+    "expect": {
+      "min_actions": 5,
+      "max_actions": 5,
+      "contains_action_types": ["wait_for", "type", "press_enter", "wait_for_url_contains", "wait"],
+      "first_action_type": "wait_for",
+      "last_action_type": "wait"
+    }
+  },
+  {
+    "name": "template_amazon_price_extraction",
+    "planner_mode": "template",
+    "goal": "search for think and grow rich on amazon and get the price",
+    "snapshot": {
+      "url": "https://www.amazon.com",
+      "title": "Amazon",
+      "elements": [
+        {
+          "tag": "input",
+          "type": "search",
+          "name": "field-keywords",
+          "id": "twotabsearchtextbox",
+          "selector": "input#twotabsearchtextbox",
+          "width": 640,
+          "height": 42
+        }
+      ]
+    },
+    "expect": {
+      "min_actions": 5,
+      "contains_action_types": ["wait_for", "type", "press_enter", "wait", "extract_text"],
+      "last_action_type": "extract_text",
+      "selector_substrings": ["a-price"]
+    }
+  },
+  {
+    "name": "template_generic_rating_extraction",
+    "planner_mode": "template",
+    "goal": "find the product rating",
+    "snapshot": {
+      "url": "https://shop.example.com/product/123",
+      "title": "Sample Product",
+      "elements": [
+        {
+          "tag": "button",
+          "text": "Add to cart",
+          "selector": "button[data-testid='add-to-cart']",
+          "width": 140,
+          "height": 36
+        }
+      ]
+    },
+    "expect": {
+      "min_actions": 1,
+      "max_actions": 1,
+      "contains_action_types": ["extract_text"],
+      "first_action_type": "extract_text",
+      "last_action_type": "extract_text",
+      "selector_substrings": ["rating"]
+    }
+  },
+  {
+    "name": "template_search_fallback_without_extract",
+    "planner_mode": "template",
+    "goal": "search for browser use",
+    "snapshot": {
+      "url": "https://duckduckgo.com",
+      "title": "DuckDuckGo",
+      "elements": [
+        {
+          "tag": "input",
+          "type": "search",
+          "name": "q",
+          "selector": "input[name='q']",
+          "width": 520,
+          "height": 38
+        }
+      ]
+    },
+    "expect": {
+      "min_actions": 4,
+      "contains_action_types": ["wait_for", "type", "press_enter"],
+      "excluded_action_types": ["extract_text"]
+    }
+  }
+]

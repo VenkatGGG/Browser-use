@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f deploy/compose/docker-compose.yml --env-file deploy/compose/.env
 
-.PHONY: up down logs ps test fmt proto run-orchestrator run-orchestrator-pool init-env preflight health infra-up infra-down build-browser-node-image dev-pool clean-pool-nodes soak-local
+.PHONY: up down logs ps test fmt proto run-orchestrator run-orchestrator-pool init-env preflight health infra-up infra-down build-browser-node-image dev-pool clean-pool-nodes soak-local planner-eval
 
 init-env:
 	@if [ ! -f deploy/compose/.env ]; then cp deploy/compose/.env.example deploy/compose/.env; fi
@@ -83,3 +83,6 @@ clean-pool-nodes: preflight
 soak-local:
 	@command -v python3 >/dev/null 2>&1 || (echo "python3 is required"; exit 1)
 	python3 scripts/soak_runner.py --base-url http://localhost:8080 --tasks 40 --submit-workers 8 --poll-interval 1.0 --timeout-seconds 300
+
+planner-eval:
+	go test ./cmd/node-agent -run TestPlannerEvalFixtures -count=1 -v
