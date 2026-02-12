@@ -983,6 +983,76 @@ func TestRunnerFailsTaskWhenLeaseOwnershipIsLost(t *testing.T) {
 	}
 }
 
+func TestRunnerCancelStopsRunningTaskWithoutOverwritingCanceledStatus(t *testing.T) {
+	taskSvc := task.NewInMemoryService()
+	nodes := pool.NewInMemoryRegistry()
+	_, err := nodes.Register(context.Background(), pool.RegisterInput{NodeID: "node-1", Address: "node-1:8091", Version: "dev"})
+	if err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+
+	runner := New(taskSvc, nodes, &blockingExecutor{}, nil, Config{
+		QueueSize:       8,
+		Workers:         1,
+		NodeWaitTimeout: 1 * time.Second,
+		PollInterval:    30 * time.Millisecond,
+		RetryBaseDelay:  20 * time.Millisecond,
+		RetryMaxDelay:   100 * time.Millisecond,
+		LeaseTTL:        1200 * time.Millisecond,
+		Leaser:          lease.NewInMemoryManager(),
+	}, log.New(io.Discard, "", 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Start(ctx)
+
+	created, err := taskSvc.Create(ctx, task.CreateInput{
+		SessionID:  "sess_1",
+		URL:        "https://example.com",
+		Goal:       "open",
+		MaxRetries: 0,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := runner.Enqueue(ctx, created.ID); err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+
+	var running task.Task
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		current, getErr := taskSvc.Get(ctx, created.ID)
+		if getErr != nil {
+			t.Fatalf("get task: %v", getErr)
+		}
+		if current.Status == task.StatusRunning {
+			running = current
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for running status; got %s", current.Status)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	if _, err := taskSvc.Cancel(ctx, task.CancelInput{
+		TaskID:    running.ID,
+		Reason:    "cancel from test",
+		Completed: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("cancel task: %v", err)
+	}
+	if !runner.Cancel(running.ID) {
+		t.Fatalf("expected runner cancel to return true")
+	}
+
+	final := waitForTerminalTask(t, ctx, taskSvc, created.ID, 4*time.Second)
+	if final.Status != task.StatusCanceled {
+		t.Fatalf("expected canceled status, got %s error=%q", final.Status, final.ErrorMessage)
+	}
+}
+
 func TestIsRetriableErrorLeaseOwnershipLost(t *testing.T) {
 	t.Parallel()
 	if !isRetriableError(errors.New("lease ownership lost during execution")) {
@@ -998,7 +1068,7 @@ func waitForTerminalTask(t *testing.T, ctx context.Context, svc task.Service, id
 		if err != nil {
 			t.Fatalf("get task: %v", err)
 		}
-		if found.Status == task.StatusCompleted || found.Status == task.StatusFailed {
+		if found.Status == task.StatusCompleted || found.Status == task.StatusFailed || found.Status == task.StatusCanceled {
 			return found
 		}
 		time.Sleep(30 * time.Millisecond)

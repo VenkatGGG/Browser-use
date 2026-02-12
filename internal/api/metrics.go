@@ -46,6 +46,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		string(task.StatusRunning):   0,
 		string(task.StatusCompleted): 0,
 		string(task.StatusFailed):    0,
+		string(task.StatusCanceled):  0,
 	}
 	blockerCounts := make(map[string]int)
 	terminal := 0
@@ -58,7 +59,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			status = "unknown"
 		}
 		statusCounts[status]++
-		if item.Status == task.StatusCompleted || item.Status == task.StatusFailed {
+		if item.Status == task.StatusCompleted || item.Status == task.StatusFailed || item.Status == task.StatusCanceled {
 			terminal++
 		}
 		if item.Status == task.StatusCompleted {

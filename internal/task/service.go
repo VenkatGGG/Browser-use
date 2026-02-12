@@ -18,11 +18,13 @@ const (
 	StatusRunning   Status = "running"
 	StatusCompleted Status = "completed"
 	StatusFailed    Status = "failed"
+	StatusCanceled  Status = "canceled"
 )
 
 var (
-	ErrTaskNotFound  = errors.New("task not found")
-	ErrTaskNotQueued = errors.New("task is not queued")
+	ErrTaskNotFound      = errors.New("task not found")
+	ErrTaskNotQueued     = errors.New("task is not queued")
+	ErrTaskNotCancelable = errors.New("task is not cancelable")
 )
 
 type Action struct {
@@ -119,12 +121,20 @@ type FailInput struct {
 	Trace                 []StepTrace
 }
 
+type CancelInput struct {
+	TaskID     string
+	Reason     string
+	Completed  time.Time
+	CanceledBy string
+}
+
 type Service interface {
 	Create(ctx context.Context, input CreateInput) (Task, error)
 	Start(ctx context.Context, input StartInput) (Task, error)
 	Retry(ctx context.Context, input RetryInput) (Task, error)
 	Complete(ctx context.Context, input CompleteInput) (Task, error)
 	Fail(ctx context.Context, input FailInput) (Task, error)
+	Cancel(ctx context.Context, input CancelInput) (Task, error)
 	Get(ctx context.Context, id string) (Task, error)
 	ListRecent(ctx context.Context, limit int) ([]Task, error)
 	ListBySourceTaskID(ctx context.Context, sourceTaskID string, limit int) ([]Task, error)
@@ -209,6 +219,9 @@ func (s *InMemoryService) Retry(_ context.Context, input RetryInput) (Task, erro
 	if !ok {
 		return Task{}, ErrTaskNotFound
 	}
+	if task.Status == StatusCanceled {
+		return Task{}, ErrTaskNotCancelable
+	}
 	retryAt := normalizeTime(input.RetryAt)
 	task.Status = StatusQueued
 	task.NodeID = ""
@@ -229,6 +242,9 @@ func (s *InMemoryService) Complete(_ context.Context, input CompleteInput) (Task
 	task, ok := s.items[input.TaskID]
 	if !ok {
 		return Task{}, ErrTaskNotFound
+	}
+	if task.Status == StatusCanceled {
+		return Task{}, ErrTaskNotCancelable
 	}
 	now := normalizeTime(input.Completed)
 	task.Status = StatusCompleted
@@ -256,6 +272,9 @@ func (s *InMemoryService) Fail(_ context.Context, input FailInput) (Task, error)
 	if !ok {
 		return Task{}, ErrTaskNotFound
 	}
+	if task.Status == StatusCanceled {
+		return Task{}, ErrTaskNotCancelable
+	}
 	now := normalizeTime(input.Completed)
 	task.Status = StatusFailed
 	task.NodeID = input.NodeID
@@ -272,6 +291,34 @@ func (s *InMemoryService) Fail(_ context.Context, input FailInput) (Task, error)
 	task.CompletedAt = &now
 	s.items[input.TaskID] = task
 	return task, nil
+}
+
+func (s *InMemoryService) Cancel(_ context.Context, input CancelInput) (Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	item, ok := s.items[input.TaskID]
+	if !ok {
+		return Task{}, ErrTaskNotFound
+	}
+	if item.Status == StatusCompleted || item.Status == StatusFailed || item.Status == StatusCanceled {
+		return Task{}, ErrTaskNotCancelable
+	}
+
+	now := normalizeTime(input.Completed)
+	reason := strings.TrimSpace(input.Reason)
+	if reason == "" {
+		reason = "task canceled"
+	}
+	item.Status = StatusCanceled
+	item.NodeID = ""
+	item.NextRetryAt = nil
+	item.ErrorMessage = reason
+	item.BlockerType = ""
+	item.BlockerMessage = ""
+	item.CompletedAt = &now
+	s.items[input.TaskID] = item
+	return item, nil
 }
 
 func (s *InMemoryService) Get(_ context.Context, id string) (Task, error) {

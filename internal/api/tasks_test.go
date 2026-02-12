@@ -20,6 +20,7 @@ import (
 type recordingDispatcher struct {
 	lastTaskID string
 	taskIDs    []string
+	canceled   []string
 	err        error
 }
 
@@ -27,6 +28,11 @@ func (d *recordingDispatcher) Enqueue(_ context.Context, taskID string) error {
 	d.lastTaskID = taskID
 	d.taskIDs = append(d.taskIDs, taskID)
 	return d.err
+}
+
+func (d *recordingDispatcher) Cancel(taskID string) bool {
+	d.canceled = append(d.canceled, taskID)
+	return true
 }
 
 type immediateCompleteDispatcher struct {
@@ -206,6 +212,91 @@ func TestCreateTaskWithUnknownSessionIDFails(t *testing.T) {
 	}
 	if len(dispatcher.taskIDs) != 0 {
 		t.Fatalf("expected no enqueued tasks when session_id is unknown")
+	}
+}
+
+func TestCancelQueuedTask(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	svc := task.NewInMemoryService()
+	sessionSvc := session.NewInMemoryService()
+	srv := NewServer(
+		sessionSvc,
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	sessionID := mustCreateSessionID(t, sessionSvc, "cancel-queued")
+	created, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID: sessionID,
+		URL:       "https://example.com",
+		Goal:      "open",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+created.ID+"/cancel", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var canceled task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &canceled); err != nil {
+		t.Fatalf("decode cancel response: %v", err)
+	}
+	if canceled.Status != task.StatusCanceled {
+		t.Fatalf("expected canceled status, got %s", canceled.Status)
+	}
+	if len(dispatcher.canceled) != 0 {
+		t.Fatalf("did not expect runner cancel call for queued task")
+	}
+}
+
+func TestCancelRunningTaskTriggersDispatcherCancel(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	svc := task.NewInMemoryService()
+	sessionSvc := session.NewInMemoryService()
+	srv := NewServer(
+		sessionSvc,
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	sessionID := mustCreateSessionID(t, sessionSvc, "cancel-running")
+	created, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID: sessionID,
+		URL:       "https://example.com",
+		Goal:      "open",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if _, err := svc.Start(context.Background(), task.StartInput{
+		TaskID:  created.ID,
+		NodeID:  "node-1",
+		Started: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+created.ID+"/cancel", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(dispatcher.canceled) != 1 || dispatcher.canceled[0] != created.ID {
+		t.Fatalf("expected dispatcher cancel for %s, got %#v", created.ID, dispatcher.canceled)
 	}
 }
 

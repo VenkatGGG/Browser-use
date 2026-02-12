@@ -43,7 +43,8 @@ func requiresCreateAuthAndRateLimit(r *http.Request) bool {
 	case "/sessions", "/v1/sessions", "/task", "/v1/tasks":
 		return true
 	default:
-		return strings.HasPrefix(path, "/v1/tasks/") && strings.HasSuffix(path, "/replay")
+		return strings.HasPrefix(path, "/v1/tasks/") &&
+			(strings.HasSuffix(path, "/replay") || strings.HasSuffix(path, "/cancel"))
 	}
 }
 

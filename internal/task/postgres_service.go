@@ -128,11 +128,13 @@ SET
 	blocker_message = NULL,
 	trace = '[]'::jsonb
 WHERE id = $1
+AND status <> $5
 RETURNING `+taskColumns,
 		input.TaskID,
 		StatusQueued,
 		retryAt,
 		input.LastError,
+		StatusCanceled,
 	)
 
 	updated, err := scanTask(row)
@@ -140,6 +142,13 @@ RETURNING `+taskColumns,
 		return updated, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
+		status, stateErr := s.fetchTaskStatus(ctx, input.TaskID)
+		if stateErr != nil {
+			return Task{}, stateErr
+		}
+		if status == StatusCanceled {
+			return Task{}, ErrTaskNotCancelable
+		}
 		return Task{}, ErrTaskNotFound
 	}
 	return Task{}, err
@@ -167,6 +176,7 @@ SET
 	next_retry_at = NULL,
 	completed_at = $9
 WHERE id = $1
+AND status <> $10
 RETURNING `+taskColumns,
 		input.TaskID,
 		StatusCompleted,
@@ -177,6 +187,7 @@ RETURNING `+taskColumns,
 		nullableString(input.ScreenshotArtifactURL),
 		traceJSON,
 		now,
+		StatusCanceled,
 	)
 
 	updated, err := scanTask(row)
@@ -184,6 +195,13 @@ RETURNING `+taskColumns,
 		return updated, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
+		status, stateErr := s.fetchTaskStatus(ctx, input.TaskID)
+		if stateErr != nil {
+			return Task{}, stateErr
+		}
+		if status == StatusCanceled {
+			return Task{}, ErrTaskNotCancelable
+		}
 		return Task{}, ErrTaskNotFound
 	}
 	return Task{}, err
@@ -211,6 +229,7 @@ SET
 	next_retry_at = NULL,
 	completed_at = $12
 WHERE id = $1
+AND status <> $13
 RETURNING `+taskColumns,
 		input.TaskID,
 		StatusFailed,
@@ -224,6 +243,7 @@ RETURNING `+taskColumns,
 		input.Error,
 		traceJSON,
 		now,
+		StatusCanceled,
 	)
 
 	updated, err := scanTask(row)
@@ -231,6 +251,57 @@ RETURNING `+taskColumns,
 		return updated, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
+		status, stateErr := s.fetchTaskStatus(ctx, input.TaskID)
+		if stateErr != nil {
+			return Task{}, stateErr
+		}
+		if status == StatusCanceled {
+			return Task{}, ErrTaskNotCancelable
+		}
+		return Task{}, ErrTaskNotFound
+	}
+	return Task{}, err
+}
+
+func (s *PostgresService) Cancel(ctx context.Context, input CancelInput) (Task, error) {
+	now := normalizeTime(input.Completed)
+	reason := strings.TrimSpace(input.Reason)
+	if reason == "" {
+		reason = "task canceled"
+	}
+
+	row := s.pool.QueryRow(ctx, `
+UPDATE tasks
+SET
+	status = $2,
+	node_id = NULL,
+	error_message = $3,
+	blocker_type = NULL,
+	blocker_message = NULL,
+	next_retry_at = NULL,
+	completed_at = $4
+WHERE id = $1
+AND status IN ($5, $6)
+RETURNING `+taskColumns,
+		input.TaskID,
+		StatusCanceled,
+		reason,
+		now,
+		StatusQueued,
+		StatusRunning,
+	)
+	updated, err := scanTask(row)
+	if err == nil {
+		return updated, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		status, stateErr := s.fetchTaskStatus(ctx, input.TaskID)
+		if stateErr != nil {
+			return Task{}, stateErr
+		}
+		if status == StatusCompleted || status == StatusFailed || status == StatusCanceled {
+			return Task{}, ErrTaskNotCancelable
+		}
 		return Task{}, ErrTaskNotFound
 	}
 	return Task{}, err

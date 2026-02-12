@@ -125,6 +125,14 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		s.replayTask(w, r, id)
 		return
 	}
+	if len(parts) == 2 && parts[1] == "cancel" {
+		if r.Method != http.MethodPost {
+			httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+		s.cancelTask(w, r, id)
+		return
+	}
 	if len(parts) == 2 && parts[1] == "replay_chain" {
 		if r.Method != http.MethodGet {
 			httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -143,6 +151,38 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.NotFound(w, r)
+}
+
+func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request, id string) {
+	found, err := s.tasks.Get(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	if found.Status == task.StatusRunning && s.taskCanceler != nil {
+		s.taskCanceler.Cancel(found.ID)
+	}
+
+	canceled, err := s.tasks.Cancel(r.Context(), task.CancelInput{
+		TaskID:     found.ID,
+		Reason:     "task canceled by api request",
+		Completed:  time.Now().UTC(),
+		CanceledBy: "api",
+	})
+	if err != nil {
+		if errors.Is(err, task.ErrTaskNotCancelable) {
+			httpx.WriteError(w, http.StatusConflict, "task_not_cancelable", err.Error())
+			return
+		}
+		if errors.Is(err, task.ErrTaskNotFound) {
+			httpx.WriteError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		httpx.WriteError(w, http.StatusInternalServerError, "cancel_failed", err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, canceled)
 }
 
 func (s *Server) createAndQueueTask(w http.ResponseWriter, r *http.Request, defaultWaitForCompletion bool) {
@@ -467,7 +507,7 @@ func (s *Server) waitForTaskTerminalState(ctx context.Context, taskID string, ti
 	for {
 		found, err := s.tasks.Get(waitCtx, taskID)
 		if err == nil {
-			if found.Status == task.StatusCompleted || found.Status == task.StatusFailed {
+			if found.Status == task.StatusCompleted || found.Status == task.StatusFailed || found.Status == task.StatusCanceled {
 				return found, true
 			}
 		}
@@ -523,6 +563,7 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 		string(task.StatusRunning):   0,
 		string(task.StatusCompleted): 0,
 		string(task.StatusFailed):    0,
+		string(task.StatusCanceled):  0,
 	}
 	blockerCounts := make(map[string]int)
 	blocked := 0
@@ -536,7 +577,7 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 		}
 		statusCounts[statusKey]++
 
-		if item.Status == task.StatusCompleted || item.Status == task.StatusFailed {
+		if item.Status == task.StatusCompleted || item.Status == task.StatusFailed || item.Status == task.StatusCanceled {
 			terminal++
 		}
 		if item.Status == task.StatusCompleted {

@@ -16,6 +16,10 @@ type TaskDispatcher interface {
 	Enqueue(ctx context.Context, taskID string) error
 }
 
+type TaskCanceler interface {
+	Cancel(taskID string) bool
+}
+
 type Server struct {
 	sessions          session.Service
 	tasks             task.Service
@@ -25,6 +29,7 @@ type Server struct {
 	requiredAPIKey    string
 	rateLimiter       *fixedWindowLimiter
 	dispatcher        TaskDispatcher
+	taskCanceler      TaskCanceler
 	defaultMaxRetries int
 	artifactPath      string
 	artifactHandler   http.Handler
@@ -55,6 +60,7 @@ func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry
 		nodes:             nodes,
 		nodeStateStore:    stateStore,
 		dispatcher:        dispatcher,
+		taskCanceler:      asTaskCanceler(dispatcher),
 		defaultMaxRetries: defaultMaxRetries,
 		artifactPath:      artifactPath,
 		artifactHandler:   artifactHandler,
@@ -62,6 +68,17 @@ func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry
 		idempotencyTTL:    24 * time.Hour,
 		idempotencyLock:   30 * time.Second,
 	}
+}
+
+func asTaskCanceler(dispatcher TaskDispatcher) TaskCanceler {
+	if dispatcher == nil {
+		return nil
+	}
+	canceler, ok := dispatcher.(TaskCanceler)
+	if !ok {
+		return nil
+	}
+	return canceler
 }
 
 func (s *Server) SetNodeRecycler(recycler NodeRecycler) {

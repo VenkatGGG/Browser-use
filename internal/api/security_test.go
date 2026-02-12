@@ -30,7 +30,7 @@ func TestRequestClientIdentityPrefersXForwardedForFirstIP(t *testing.T) {
 	}
 }
 
-func TestRequiresCreateAuthAndRateLimitMatchesReplayPostsOnly(t *testing.T) {
+func TestRequiresCreateAuthAndRateLimitMatchesReplayAndCancelPosts(t *testing.T) {
 	t.Parallel()
 
 	postReplay := httptest.NewRequest(http.MethodPost, "/v1/tasks/task_1/replay", nil)
@@ -46,6 +46,11 @@ func TestRequiresCreateAuthAndRateLimitMatchesReplayPostsOnly(t *testing.T) {
 	postByID := httptest.NewRequest(http.MethodPost, "/v1/tasks/task_1", nil)
 	if requiresCreateAuthAndRateLimit(postByID) {
 		t.Fatalf("did not expect generic task by-id post route to require auth/rate limit")
+	}
+
+	postCancel := httptest.NewRequest(http.MethodPost, "/v1/tasks/task_1/cancel", nil)
+	if !requiresCreateAuthAndRateLimit(postCancel) {
+		t.Fatalf("expected cancel post route to require auth/rate limit")
 	}
 }
 

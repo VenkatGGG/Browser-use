@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -91,5 +92,62 @@ func TestInMemoryServiceClearsDerivedOutputsOnRetry(t *testing.T) {
 	}
 	if len(retried.ExtractedOutputs) != 0 {
 		t.Fatalf("expected retry to clear extracted outputs, got %d", len(retried.ExtractedOutputs))
+	}
+}
+
+func TestInMemoryServiceCancelQueuedTask(t *testing.T) {
+	svc := NewInMemoryService()
+	created, err := svc.Create(context.Background(), CreateInput{
+		SessionID: "sess_1",
+		URL:       "https://example.com",
+		Goal:      "open",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	canceled, err := svc.Cancel(context.Background(), CancelInput{
+		TaskID:    created.ID,
+		Reason:    "user requested cancel",
+		Completed: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("cancel task: %v", err)
+	}
+	if canceled.Status != StatusCanceled {
+		t.Fatalf("expected canceled status, got %s", canceled.Status)
+	}
+}
+
+func TestInMemoryServiceCancelBlocksLaterComplete(t *testing.T) {
+	svc := NewInMemoryService()
+	created, err := svc.Create(context.Background(), CreateInput{
+		SessionID: "sess_1",
+		URL:       "https://example.com",
+		Goal:      "open",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if _, err := svc.Start(context.Background(), StartInput{
+		TaskID:  created.ID,
+		NodeID:  "node-1",
+		Started: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	if _, err := svc.Cancel(context.Background(), CancelInput{
+		TaskID:    created.ID,
+		Completed: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("cancel running task: %v", err)
+	}
+	if _, err := svc.Complete(context.Background(), CompleteInput{
+		TaskID:    created.ID,
+		NodeID:    "node-1",
+		Completed: time.Now().UTC(),
+	}); !errors.Is(err, ErrTaskNotCancelable) {
+		t.Fatalf("expected ErrTaskNotCancelable after cancel, got %v", err)
 	}
 }

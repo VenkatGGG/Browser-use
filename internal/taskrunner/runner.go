@@ -50,6 +50,8 @@ type Runner struct {
 	leaser   lease.Manager
 	leaseTTL time.Duration
 	ownerID  string
+	runningM sync.Mutex
+	running  map[string]context.CancelFunc
 
 	blockedDomains map[string]time.Time
 	blockedM       sync.Mutex
@@ -106,6 +108,7 @@ func New(tasks task.Service, nodes pool.Registry, executor nodeclient.Client, ar
 		leaser:         cfg.Leaser,
 		leaseTTL:       cfg.LeaseTTL,
 		ownerID:        ownerID,
+		running:        make(map[string]context.CancelFunc),
 		blockedDomains: make(map[string]time.Time),
 	}
 }
@@ -142,6 +145,21 @@ func (r *Runner) Enqueue(ctx context.Context, taskID string) error {
 		r.clearEnqueued(taskID)
 		return ErrQueueFull
 	}
+}
+
+func (r *Runner) Cancel(taskID string) bool {
+	id := strings.TrimSpace(taskID)
+	if id == "" {
+		return false
+	}
+	r.runningM.Lock()
+	cancel, ok := r.running[id]
+	r.runningM.Unlock()
+	if !ok || cancel == nil {
+		return false
+	}
+	cancel()
+	return true
 }
 
 func (r *Runner) worker(ctx context.Context, workerID int) {
@@ -200,6 +218,8 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 
 	execCtx, stopExecution := context.WithCancel(ctx)
 	defer stopExecution()
+	r.setRunningCancel(startedTask.ID, stopExecution)
+	defer r.clearRunningCancel(startedTask.ID)
 	var lostLease atomic.Bool
 	stopKeepalive := r.startLeaseKeepalive(execCtx, nodeLease, func() {
 		lostLease.Store(true)
@@ -264,6 +284,9 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		ScreenshotArtifactURL: screenshotArtifactURL,
 		Trace:                 r.mapTaskTraceWithArtifacts(ctx, startedTask.ID, result.Trace),
 	}); err != nil {
+		if errors.Is(err, task.ErrTaskNotCancelable) {
+			return
+		}
 		r.failTask(ctx, startedTask.ID, nodeLease.Node.ID, fmt.Errorf("failed to complete task: %w", err))
 		return
 	}
@@ -311,6 +334,26 @@ func (r *Runner) clearEnqueued(taskID string) {
 	r.enqueueM.Lock()
 	delete(r.enqueued, taskID)
 	r.enqueueM.Unlock()
+}
+
+func (r *Runner) setRunningCancel(taskID string, cancel context.CancelFunc) {
+	id := strings.TrimSpace(taskID)
+	if id == "" || cancel == nil {
+		return
+	}
+	r.runningM.Lock()
+	r.running[id] = cancel
+	r.runningM.Unlock()
+}
+
+func (r *Runner) clearRunningCancel(taskID string) {
+	id := strings.TrimSpace(taskID)
+	if id == "" {
+		return
+	}
+	r.runningM.Lock()
+	delete(r.running, id)
+	r.runningM.Unlock()
 }
 
 func (r *Runner) handleExecutionFailure(ctx context.Context, taskRecord task.Task, nodeID string, execErr error) {
