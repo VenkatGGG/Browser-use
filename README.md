@@ -42,9 +42,10 @@ Local-first orchestration infrastructure for AI browser automation.
   - CPU/memory/pid limits
   - Chrome debug port is no longer publicly published.
 
-### Phase 3 started (local provider + warm pool)
+### Phase 3 complete (local provider + warm pool)
 - Warm-pool control loop implemented in `internal/pool/manager.go`:
   - maintains target ready count
+  - scales down surplus managed ready nodes back to target
   - tracks `warming` nodes and times them out
   - reaps stale nodes on heartbeat timeout
   - reaps old nodes by max-age
@@ -64,6 +65,7 @@ Local-first orchestration infrastructure for AI browser automation.
   - lease state is reflected in node registry (`leased_until`)
 - API idempotency support added for creates:
   - `POST /v1/sessions` and `POST /v1/tasks`
+  - `POST /v1/tasks/{id}/replay`
   - send `Idempotency-Key` header to get safe retries without duplicate resources
   - `internal/idempotency` package (in-memory + Redis implementations)
   - retention and lock TTL via:
@@ -296,7 +298,7 @@ make soak-local      # enqueue/poll many tasks and print reliability summary
 - Planner mode defaults to `template`; set `NODE_AGENT_PLANNER_MODE=endpoint` to call an external planner API using compact page state, or `NODE_AGENT_PLANNER_MODE=openai` to use direct model-backed planning.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
 - `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.
-- `Idempotency-Key` header is supported on `POST /v1/sessions` and `POST /v1/tasks`.
+- `Idempotency-Key` header is supported on `POST /v1/sessions`, `POST /v1/tasks`, and `POST /v1/tasks/{id}/replay`.
 - Optional API safety controls:
   - `ORCHESTRATOR_API_KEY=<secret>` enforces API key auth on create/replay routes (`POST /sessions`, `POST /v1/sessions`, `POST /task`, `POST /v1/tasks`, `POST /v1/tasks/{id}/replay`).
   - Send key via `X-API-Key` (or `Authorization: Bearer <secret>`).

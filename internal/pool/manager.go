@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -99,6 +100,7 @@ func (m *Manager) reconcile(ctx context.Context, targetReady int) error {
 
 	knownManaged := make(map[string]struct{}, len(nodes))
 	readyCount := 0
+	managedReadyCandidates := make([]Node, 0)
 	for _, node := range nodes {
 		if !m.isManagedNode(node.ID) {
 			if node.State == NodeStateReady {
@@ -107,10 +109,6 @@ func (m *Manager) reconcile(ctx context.Context, targetReady int) error {
 			continue
 		}
 		knownManaged[node.ID] = struct{}{}
-
-		if node.State == NodeStateReady {
-			readyCount++
-		}
 
 		if m.shouldReapByHeartbeat(node, now) {
 			m.logger.Printf("pool manager reaping stale node by heartbeat timeout: node_id=%s", node.ID)
@@ -122,10 +120,16 @@ func (m *Manager) reconcile(ctx context.Context, targetReady int) error {
 			m.destroyNode(ctx, node.ID, now)
 			continue
 		}
+
+		if node.State == NodeStateReady {
+			readyCount++
+			managedReadyCandidates = append(managedReadyCandidates, node)
+		}
 	}
 
 	m.pruneWarmingKnown(knownManaged)
 	warmingCount := m.reapTimedOutWarming(ctx, now)
+	readyCount = m.scaleDownExcessReady(ctx, now, readyCount, targetReady, managedReadyCandidates)
 	needed := targetReady - readyCount - warmingCount
 	if needed <= 0 {
 		return nil
@@ -239,4 +243,43 @@ func (m *Manager) reapTimedOutWarming(ctx context.Context, now time.Time) int {
 		}
 	}
 	return active
+}
+
+func (m *Manager) scaleDownExcessReady(ctx context.Context, now time.Time, readyCount, targetReady int, candidates []Node) int {
+	surplus := readyCount - targetReady
+	if surplus <= 0 || len(candidates) == 0 {
+		return readyCount
+	}
+
+	// Prefer reaping oldest managed ready nodes first.
+	sort.Slice(candidates, func(i, j int) bool {
+		leftBooted := candidates[i].BootedAt.UTC()
+		rightBooted := candidates[j].BootedAt.UTC()
+		switch {
+		case leftBooted.IsZero() && rightBooted.IsZero():
+			return candidates[i].CreatedAt.Before(candidates[j].CreatedAt)
+		case leftBooted.IsZero():
+			return false
+		case rightBooted.IsZero():
+			return true
+		default:
+			return leftBooted.Before(rightBooted)
+		}
+	})
+
+	toReap := minInt(surplus, len(candidates))
+	for i := 0; i < toReap; i++ {
+		nodeID := candidates[i].ID
+		m.logger.Printf("pool manager scaling down surplus ready node: node_id=%s", nodeID)
+		m.destroyNode(ctx, nodeID, now)
+		readyCount--
+	}
+	return readyCount
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -879,6 +879,75 @@ func TestReplayTaskRejectsConflictingSessionInputs(t *testing.T) {
 	}
 }
 
+func TestReplayTaskIdempotencyKeyReturnsSameTaskAndSingleDispatch(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	svc := task.NewInMemoryService()
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	original, err := svc.Create(context.Background(), task.CreateInput{
+		SessionID:  "sess_original",
+		URL:        "https://example.com",
+		Goal:       "open page",
+		MaxRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("create original task: %v", err)
+	}
+
+	body1 := []byte(`{"max_retries":2}`)
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+original.ID+"/replay", bytes.NewReader(body1))
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("Idempotency-Key", "replay-key-1")
+	rr1 := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusAccepted {
+		t.Fatalf("expected first replay status 202, got %d body=%s", rr1.Code, rr1.Body.String())
+	}
+
+	body2 := []byte(`{"max_retries":5}`)
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+original.ID+"/replay", bytes.NewReader(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Idempotency-Key", "replay-key-1")
+	rr2 := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusAccepted {
+		t.Fatalf("expected second replay status 202, got %d body=%s", rr2.Code, rr2.Body.String())
+	}
+
+	var first task.Task
+	var second task.Task
+	if err := json.Unmarshal(rr1.Body.Bytes(), &first); err != nil {
+		t.Fatalf("decode first replay task: %v", err)
+	}
+	if err := json.Unmarshal(rr2.Body.Bytes(), &second); err != nil {
+		t.Fatalf("decode second replay task: %v", err)
+	}
+	if first.ID == "" || second.ID == "" {
+		t.Fatalf("expected non-empty replay task ids")
+	}
+	if first.ID != second.ID {
+		t.Fatalf("expected same replay task id for idempotent requests, got %s and %s", first.ID, second.ID)
+	}
+
+	dispatchCount := 0
+	for _, taskID := range dispatcher.taskIDs {
+		if taskID == first.ID {
+			dispatchCount++
+		}
+	}
+	if dispatchCount != 1 {
+		t.Fatalf("expected replay task to be dispatched once, got %d", dispatchCount)
+	}
+}
+
 func TestReplayChain(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
 	svc := task.NewInMemoryService()

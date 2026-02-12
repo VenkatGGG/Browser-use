@@ -229,6 +229,16 @@ func (s *Server) resolveTaskSessionID(ctx context.Context, sessionID, tenantID s
 }
 
 func (s *Server) replayTask(w http.ResponseWriter, r *http.Request, sourceTaskID string) {
+	scope := "tasks:replay:" + strings.TrimSpace(sourceTaskID)
+	if s.handleIdempotentRequest(w, r, scope, func(resp http.ResponseWriter) {
+		s.replayTaskNonIdempotent(resp, r, sourceTaskID)
+	}) {
+		return
+	}
+	s.replayTaskNonIdempotent(w, r, sourceTaskID)
+}
+
+func (s *Server) replayTaskNonIdempotent(w http.ResponseWriter, r *http.Request, sourceTaskID string) {
 	original, err := s.tasks.Get(r.Context(), sourceTaskID)
 	if err != nil {
 		httpx.WriteError(w, http.StatusNotFound, "not_found", err.Error())
