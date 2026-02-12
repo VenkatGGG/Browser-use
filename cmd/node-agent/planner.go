@@ -444,6 +444,7 @@ func allowedPlannerActions() []string {
 		"click",
 		"type",
 		"scroll",
+		"extract_text",
 		"wait",
 		"press_enter",
 		"submit_search",
@@ -460,6 +461,7 @@ func sanitizePlannedActions(actions []executeAction) []executeAction {
 		"click":                 {},
 		"type":                  {},
 		"scroll":                {},
+		"extract_text":          {},
 		"wait":                  {},
 		"press_enter":           {},
 		"submit_search":         {},
@@ -502,7 +504,7 @@ func sanitizePlannedActions(actions []executeAction) []executeAction {
 		}
 
 		switch typ {
-		case "wait_for", "click", "type", "press_enter", "submit_search":
+		case "wait_for", "click", "type", "extract_text", "press_enter", "submit_search":
 			if normalized.Selector == "" {
 				continue
 			}

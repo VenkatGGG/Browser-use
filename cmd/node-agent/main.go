@@ -87,6 +87,7 @@ type executeTraceStep struct {
 	Action                executeAction `json:"action"`
 	Status                string        `json:"status"`
 	Error                 string        `json:"error,omitempty"`
+	OutputText            string        `json:"output_text,omitempty"`
 	StartedAt             time.Time     `json:"started_at,omitempty"`
 	CompletedAt           time.Time     `json:"completed_at,omitempty"`
 	DurationMS            int64         `json:"duration_ms,omitempty"`
@@ -212,7 +213,8 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 			Status:    "succeeded",
 			StartedAt: started,
 		}
-		if err := e.applyAction(runCtx, client, action); err != nil {
+		outputText, err := e.applyAction(runCtx, client, action)
+		if err != nil {
 			finished := time.Now().UTC()
 			step.Status = "failed"
 			step.Error = err.Error()
@@ -247,6 +249,7 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 		finished := time.Now().UTC()
 		step.CompletedAt = finished
 		step.DurationMS = finished.Sub(started).Milliseconds()
+		step.OutputText = strings.TrimSpace(outputText)
 		if e.traceScreenshots {
 			if screenshot, shotErr := client.CaptureScreenshot(runCtx); shotErr == nil {
 				step.ScreenshotBase64 = screenshot
@@ -320,10 +323,10 @@ func (e *browserExecutor) detectBlocker(ctx context.Context, client *cdp.Client)
 	}
 }
 
-func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, action executeAction) error {
+func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, action executeAction) (string, error) {
 	actionType := strings.ToLower(strings.TrimSpace(action.Type))
 	if actionType == "" {
-		return errors.New("action type is required")
+		return "", errors.New("action type is required")
 	}
 
 	timeout := actionTimeout(action.TimeoutMS)
@@ -334,60 +337,73 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 	case "wait_for":
 		selector := strings.TrimSpace(action.Selector)
 		if selector == "" {
-			return errors.New("selector is required for wait_for")
+			return "", errors.New("selector is required for wait_for")
 		}
-		return client.WaitForSelector(actionCtx, selector, timeout)
+		return "", client.WaitForSelector(actionCtx, selector, timeout)
 	case "click":
 		selector := strings.TrimSpace(action.Selector)
 		if selector == "" {
-			return errors.New("selector is required for click")
+			return "", errors.New("selector is required for click")
 		}
 		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
-			return err
+			return "", err
 		}
-		return client.ClickSelector(actionCtx, selector)
+		return "", client.ClickSelector(actionCtx, selector)
 	case "type":
 		selector := strings.TrimSpace(action.Selector)
 		if selector == "" {
-			return errors.New("selector is required for type")
+			return "", errors.New("selector is required for type")
 		}
 		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
-			return err
+			return "", err
 		}
 		if err := client.TypeIntoSelector(actionCtx, selector, action.Text); err != nil {
-			return err
+			return "", err
 		}
 		if strings.TrimSpace(action.Text) != "" {
 			if err := client.WaitForSelectorValueContains(actionCtx, selector, action.Text, timeout); err != nil {
-				return err
+				return "", err
 			}
 		}
 		if action.DelayMS > 0 {
 			delay := time.Duration(action.DelayMS) * time.Millisecond
 			select {
 			case <-actionCtx.Done():
-				return actionCtx.Err()
+				return "", actionCtx.Err()
 			case <-time.After(delay):
 			}
 		}
-		return nil
+		return "", nil
 	case "scroll":
 		direction := strings.TrimSpace(action.Text)
 		if direction == "" {
 			direction = "down"
 		}
 		if err := client.Scroll(actionCtx, direction, action.Pixels); err != nil {
-			return err
+			return "", err
 		}
 		if action.DelayMS > 0 {
 			delay := time.Duration(action.DelayMS) * time.Millisecond
 			select {
 			case <-actionCtx.Done():
-				return actionCtx.Err()
+				return "", actionCtx.Err()
 			case <-time.After(delay):
 			}
 		}
-		return nil
+		return "", nil
+	case "extract_text":
+		selector := strings.TrimSpace(action.Selector)
+		if selector == "" {
+			return "", errors.New("selector is required for extract_text")
+		}
+		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
+			return "", err
+		}
+		text, err := client.ExtractText(actionCtx, selector)
+		if err != nil {
+			return "", err
+		}
+		return text, nil
 	case "wait":
 		delay := time.Duration(action.DelayMS) * time.Millisecond
 		if delay <= 0 {
@@ -395,50 +411,50 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		}
 		select {
 		case <-actionCtx.Done():
-			return actionCtx.Err()
+			return "", actionCtx.Err()
 		case <-time.After(delay):
-			return nil
+			return "", nil
 		}
 	case "press_enter":
 		selector := strings.TrimSpace(action.Selector)
 		if selector == "" {
-			return errors.New("selector is required for press_enter")
+			return "", errors.New("selector is required for press_enter")
 		}
 		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
-			return err
+			return "", err
 		}
 		previousURL, _ := client.EvaluateString(actionCtx, "window.location.href")
 		if err := client.PressEnterOnSelector(actionCtx, selector); err != nil {
-			return err
+			return "", err
 		}
 		if strings.TrimSpace(previousURL) != "" {
 			_, _ = client.WaitForURLChange(actionCtx, previousURL, minDuration(timeout, 1500*time.Millisecond))
 		}
-		return nil
+		return "", nil
 	case "submit_search":
 		selector := strings.TrimSpace(action.Selector)
 		if selector == "" {
-			return errors.New("selector is required for submit_search")
+			return "", errors.New("selector is required for submit_search")
 		}
 		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
-			return err
+			return "", err
 		}
 		previousURL, _ := client.EvaluateString(actionCtx, "window.location.href")
 		if err := client.PressEnterOnSelector(actionCtx, selector); err != nil {
-			return err
+			return "", err
 		}
 		if strings.TrimSpace(previousURL) != "" {
 			_, _ = client.WaitForURLChange(actionCtx, previousURL, minDuration(timeout, 1500*time.Millisecond))
 		}
-		return nil
+		return "", nil
 	case "wait_for_url_contains":
 		fragment := strings.TrimSpace(action.Text)
 		if fragment == "" {
-			return errors.New("text is required for wait_for_url_contains")
+			return "", errors.New("text is required for wait_for_url_contains")
 		}
-		return client.WaitForURLContains(actionCtx, fragment, timeout)
+		return "", client.WaitForURLContains(actionCtx, fragment, timeout)
 	default:
-		return fmt.Errorf("unsupported action type %q", actionType)
+		return "", fmt.Errorf("unsupported action type %q", actionType)
 	}
 }
 

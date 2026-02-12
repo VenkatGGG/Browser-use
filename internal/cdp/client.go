@@ -402,6 +402,56 @@ func (c *Client) TypeIntoSelector(ctx context.Context, selector, text string) er
 	return nil
 }
 
+func (c *Client) ExtractText(ctx context.Context, selector string) (string, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return "", errors.New("selector is required")
+	}
+
+	expression := fmt.Sprintf(`(() => {
+	const visible = (node) => {
+		const style = window.getComputedStyle(node);
+		if (!style || style.display === "none" || style.visibility === "hidden") return false;
+		const rect = node.getBoundingClientRect();
+		return rect.width > 1 && rect.height > 1;
+	};
+	const el = Array.from(document.querySelectorAll(%q)).find(visible);
+	if (!el) return { ok: false, error: "not_found", text: "" };
+
+	let text = "";
+	if ("value" in el && typeof el.value !== "undefined") {
+		text = String(el.value || "");
+	}
+	if (!text) {
+		text = String(el.innerText || el.textContent || "");
+	}
+	text = text.replace(/\s+/g, " ").trim();
+	return { ok: true, text };
+	})()`, selector)
+
+	value, err := c.EvaluateAny(ctx, expression)
+	if err != nil {
+		return "", err
+	}
+
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	var decoded struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+		Text  string `json:"text"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return "", err
+	}
+	if !decoded.OK {
+		return "", fmt.Errorf("extract_text failed: %s", strings.TrimSpace(decoded.Error))
+	}
+	return strings.TrimSpace(decoded.Text), nil
+}
+
 func (c *Client) Scroll(ctx context.Context, direction string, pixels int) error {
 	dir := strings.ToLower(strings.TrimSpace(direction))
 	if dir == "" {

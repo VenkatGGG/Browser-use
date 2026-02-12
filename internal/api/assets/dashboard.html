@@ -1158,6 +1158,7 @@
             const duration = formatDurationMS(Number(step.duration_ms || 0));
             const action = actionSummary(step.action || {});
             const error = String(step.error || "").trim();
+            const outputText = String(step.output_text || "").trim();
             const artifactURL = String(step.screenshot_artifact_url || "").trim();
             const inlineShot = String(step.screenshot_base64 || "").trim();
             const screenshotPreviewURL = artifactURL
@@ -1180,6 +1181,7 @@
                   '</div>' +
                 '</div>' +
                 '<div class="trace-action">' + escapeHTML(action) + '</div>' +
+                (outputText ? ('<div class="trace-time"><strong>output:</strong> ' + escapeHTML(compactText(outputText, 240)) + '</div>') : '') +
                 (error ? ('<div class="trace-error">' + escapeHTML(error) + '</div>') : '') +
                 '<div class="trace-time">start: ' + escapeHTML(startedAt) + ' | end: ' + escapeHTML(completedAt) + '</div>' +
               '</div>'

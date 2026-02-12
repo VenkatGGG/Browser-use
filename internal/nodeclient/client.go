@@ -25,6 +25,7 @@ type StepTrace struct {
 	Action                Action    `json:"action"`
 	Status                string    `json:"status"`
 	Error                 string    `json:"error,omitempty"`
+	OutputText            string    `json:"output_text,omitempty"`
 	StartedAt             time.Time `json:"started_at,omitempty"`
 	CompletedAt           time.Time `json:"completed_at,omitempty"`
 	DurationMS            int64     `json:"duration_ms,omitempty"`

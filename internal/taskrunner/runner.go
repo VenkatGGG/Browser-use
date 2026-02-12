@@ -386,6 +386,7 @@ func isRetriableError(err error) bool {
 		"invalid selector syntax",
 		"click failed: not_found",
 		"type failed: not_found",
+		"extract_text failed: not_found",
 		"press_enter failed: not_found",
 	}
 	for _, signal := range nonRetriableSignals {
@@ -610,6 +611,7 @@ func (r *Runner) mapTaskTraceWithArtifacts(ctx context.Context, taskID string, t
 			},
 			Status:                step.Status,
 			Error:                 step.Error,
+			OutputText:            step.OutputText,
 			StartedAt:             utcTimePtr(step.StartedAt),
 			CompletedAt:           utcTimePtr(step.CompletedAt),
 			DurationMS:            step.DurationMS,

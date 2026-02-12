@@ -253,7 +253,7 @@ make run-orchestrator
 - Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
 - Task status payload now also includes `trace` for step-by-step execution visibility.
-- Supported deterministic action types include `wait_for`, `click`, `type`, `scroll`, `wait`, `press_enter`, and `wait_for_url_contains`.
+- Supported deterministic action types include `wait_for`, `click`, `type`, `extract_text`, `scroll`, `wait`, `press_enter`, and `wait_for_url_contains`.
 - Planner mode defaults to `heuristic`; set `NODE_AGENT_PLANNER_MODE=endpoint` to call an external planner API using compact page state.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
 - `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.

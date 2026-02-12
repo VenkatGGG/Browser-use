@@ -33,7 +33,8 @@ func (e *browserExecutor) OpenURL(ctx context.Context, targetURL string) error {
 
 func (e *browserExecutor) RunAction(ctx context.Context, action executeAction) error {
 	return e.withLockedClient(ctx, func(runCtx context.Context, client *cdp.Client) error {
-		return e.applyAction(runCtx, client, action)
+		_, err := e.applyAction(runCtx, client, action)
+		return err
 	})
 }
 
