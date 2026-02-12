@@ -23,6 +23,19 @@ export interface TaskAction {
   delay_ms?: number;
 }
 
+export interface TaskTraceStep {
+  index?: number;
+  action?: TaskAction;
+  status?: string;
+  error?: string;
+  output_text?: string;
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number;
+  screenshot_base64?: string;
+  screenshot_artifact_url?: string;
+}
+
 export interface TaskItem {
   id: string;
   source_task_id?: string;
@@ -38,6 +51,8 @@ export interface TaskItem {
   blocker_type?: string;
   blocker_message?: string;
   error_message?: string;
+  trace?: TaskTraceStep[];
+  extracted_outputs?: string[];
   screenshot_artifact_url?: string;
   created_at?: string;
   started_at?: string;
@@ -54,5 +69,16 @@ export interface TaskStats {
     terminal?: number;
     blocked?: number;
   };
+}
+
+export interface ReplayChainResponse {
+  tasks?: TaskItem[];
+  truncated?: boolean;
+}
+
+export interface DirectReplaysResponse {
+  source_task_id?: string;
+  tasks?: TaskItem[];
+  count?: number;
 }
 

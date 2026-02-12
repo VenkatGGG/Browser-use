@@ -78,6 +78,46 @@ body {
   gap: 10px;
 }
 
+.nodesPane {
+  border: 1px solid #d6ccc0;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.nodesPane h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.nodeGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.nodeCard {
+  border: 1px solid #ece3d9;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.nodeHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  align-items: center;
+}
+
+.nodeMeta {
+  margin-top: 6px;
+  display: grid;
+  gap: 3px;
+  font-size: 11px;
+  color: #4d5c64;
+}
+
 .tablePane,
 .detailPane {
   border: 1px solid #d6ccc0;
@@ -173,5 +213,49 @@ body {
   font-size: 12px;
   margin: 0 0 8px;
   line-height: 1.4;
+}
+
+.tracePane {
+  margin-top: 10px;
+  border-top: 1px solid #ece3d9;
+  padding-top: 10px;
+}
+
+.tracePane h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.traceList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.traceStep {
+  border: 1px solid #ece3d9;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 11px;
+  background: #faf6ef;
+}
+
+.traceTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  align-items: center;
+}
+
+.traceError {
+  color: #9b321a;
+  margin-top: 4px;
+}
+
+.traceTime {
+  color: #4d5c64;
+  margin-top: 4px;
 }
 

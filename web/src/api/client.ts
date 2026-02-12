@@ -1,4 +1,10 @@
-import type { NodeItem, TaskItem, TaskStats } from "./types";
+import type {
+  DirectReplaysResponse,
+  NodeItem,
+  ReplayChainResponse,
+  TaskItem,
+  TaskStats
+} from "./types";
 
 async function requestJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -38,6 +44,20 @@ export async function replayTask(taskID: string, freshSession: boolean): Promise
 
 export async function cancelTask(taskID: string): Promise<TaskItem> {
   return requestJSON<TaskItem>(`/v1/tasks/${encodeURIComponent(taskID)}/cancel`, {
+    method: "POST"
+  });
+}
+
+export async function fetchReplayChain(taskID: string): Promise<ReplayChainResponse> {
+  return requestJSON<ReplayChainResponse>(`/v1/tasks/${encodeURIComponent(taskID)}/replay_chain?max_depth=20`);
+}
+
+export async function fetchDirectReplays(taskID: string): Promise<DirectReplaysResponse> {
+  return requestJSON<DirectReplaysResponse>(`/v1/tasks/${encodeURIComponent(taskID)}/replays?limit=200`);
+}
+
+export async function runNodeAction(nodeID: string, action: "drain" | "activate" | "recycle"): Promise<NodeItem> {
+  return requestJSON<NodeItem>(`/v1/nodes/${encodeURIComponent(nodeID)}/${encodeURIComponent(action)}`, {
     method: "POST"
   });
 }
