@@ -338,4 +338,84 @@ func TestNewActionPlannerSelectsExpectedMode(t *testing.T) {
 	if planner := newActionPlanner(plannerConfig{Mode: "endpoint", EndpointURL: "http://planner.local"}); planner == nil || planner.Name() != "endpoint" {
 		t.Fatalf("expected endpoint planner when endpoint url is provided")
 	}
+	if planner := newActionPlanner(plannerConfig{Mode: "openai"}); planner == nil || planner.Name() != "template" {
+		t.Fatalf("expected template fallback when openai key is missing")
+	}
+	if planner := newActionPlanner(plannerConfig{Mode: "openai", AuthToken: "test-key"}); planner == nil || planner.Name() != "openai" {
+		t.Fatalf("expected openai planner when auth token is provided")
+	}
+}
+
+func TestOpenAIPlannerUsesModelActions(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := strings.TrimSpace(r.Header.Get("Authorization")); got != "Bearer sk-test" {
+			t.Fatalf("expected bearer auth header, got %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{
+					"message": map[string]any{
+						"content": `{"actions":[{"type":"wait","delay_ms":700}]}`,
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	planner := &openAIPlanner{
+		baseURL:     server.URL,
+		apiKey:      "sk-test",
+		model:       "gpt-4o-mini",
+		timeout:     2 * time.Second,
+		maxElements: 10,
+		client:      server.Client(),
+		fallback:    &heuristicPlanner{},
+	}
+
+	snapshot := pageSnapshot{
+		URL:   "https://example.com",
+		Title: "Example",
+		Elements: []pageElement{
+			{Tag: "button", Text: "Continue", Selector: "button.primary", StableID: "el_1", Width: 90, Height: 32},
+		},
+	}
+	actions, err := planner.Plan(context.Background(), "continue", snapshot)
+	if err != nil {
+		t.Fatalf("Plan returned error: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Type != "wait" {
+		t.Fatalf("unexpected openai actions: %+v", actions)
+	}
+}
+
+func TestExtractJSONObject(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{
+			in:   `{"actions":[{"type":"wait"}]}`,
+			want: `{"actions":[{"type":"wait"}]}`,
+		},
+		{
+			in:   "```json\n{\"actions\":[{\"type\":\"wait\"}]}\n```",
+			want: `{"actions":[{"type":"wait"}]}`,
+		},
+		{
+			in:   "prefix {\"actions\":[{\"type\":\"wait\"}]} suffix",
+			want: `{"actions":[{"type":"wait"}]}`,
+		},
+	}
+
+	for _, tc := range cases {
+		got := extractJSONObject(tc.in)
+		if got != tc.want {
+			t.Fatalf("extractJSONObject(%q)=%q want=%q", tc.in, got, tc.want)
+		}
+	}
 }

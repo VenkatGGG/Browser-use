@@ -45,6 +45,15 @@ type endpointPlanner struct {
 	client      *http.Client
 	fallback    actionPlanner
 }
+type openAIPlanner struct {
+	baseURL     string
+	apiKey      string
+	model       string
+	timeout     time.Duration
+	maxElements int
+	client      *http.Client
+	fallback    actionPlanner
+}
 
 type endpointPlanRequest struct {
 	Goal           string             `json:"goal"`
@@ -58,6 +67,25 @@ type endpointPlanResponse struct {
 	Plan    struct {
 		Actions []executeAction `json:"actions"`
 	} `json:"plan"`
+}
+
+type openAIChatRequest struct {
+	Model       string              `json:"model"`
+	Temperature float64             `json:"temperature,omitempty"`
+	Messages    []openAIChatMessage `json:"messages"`
+}
+
+type openAIChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type openAIChatResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
 }
 
 func newActionPlanner(cfg plannerConfig) actionPlanner {
@@ -94,6 +122,36 @@ func newActionPlanner(cfg plannerConfig) actionPlanner {
 			client:      &http.Client{},
 			fallback:    template,
 		}
+	case "openai", "model":
+		apiKey := strings.TrimSpace(cfg.AuthToken)
+		if apiKey == "" {
+			return template
+		}
+		baseURL := strings.TrimSpace(cfg.EndpointURL)
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1/chat/completions"
+		}
+		timeout := cfg.Timeout
+		if timeout <= 0 {
+			timeout = 8 * time.Second
+		}
+		maxElements := cfg.MaxElements
+		if maxElements <= 0 {
+			maxElements = 48
+		}
+		model := strings.TrimSpace(cfg.Model)
+		if model == "" {
+			model = "gpt-4o-mini"
+		}
+		return &openAIPlanner{
+			baseURL:     baseURL,
+			apiKey:      apiKey,
+			model:       model,
+			timeout:     timeout,
+			maxElements: maxElements,
+			client:      &http.Client{},
+			fallback:    template,
+		}
 	case "off":
 		return nil
 	default:
@@ -111,6 +169,10 @@ func (p *templatePlanner) Name() string {
 
 func (p *endpointPlanner) Name() string {
 	return "endpoint"
+}
+
+func (p *openAIPlanner) Name() string {
+	return "openai"
 }
 
 func (p *endpointPlanner) Plan(ctx context.Context, goal string, snapshot pageSnapshot) ([]executeAction, error) {
@@ -189,6 +251,140 @@ func (p *endpointPlanner) planFallback(ctx context.Context, goal string, snapsho
 		return nil, cause
 	}
 	return actions, nil
+}
+
+func (p *openAIPlanner) Plan(ctx context.Context, goal string, snapshot pageSnapshot) ([]executeAction, error) {
+	baseURL := strings.TrimSpace(p.baseURL)
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1/chat/completions"
+	}
+	apiKey := strings.TrimSpace(p.apiKey)
+	if apiKey == "" {
+		return p.planFallback(ctx, goal, snapshot, errors.New("openai api key is empty"))
+	}
+	model := strings.TrimSpace(p.model)
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+
+	packet := buildPlannerStatePacket(goal, snapshot, p.maxElements)
+	packetJSON, err := json.Marshal(packet)
+	if err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("encode planner state: %w", err))
+	}
+
+	reqPayload := openAIChatRequest{
+		Model:       model,
+		Temperature: 0.1,
+		Messages: []openAIChatMessage{
+			{
+				Role: "system",
+				Content: "You are a browser automation planner. Return ONLY JSON with shape " +
+					`{"actions":[{"type":"...","selector":"...","text":"...","timeout_ms":0,"delay_ms":0,"pixels":0}]}. ` +
+					"Only use allowed action types: wait_for, click, type, scroll, extract_text, wait, press_enter, submit_search, wait_for_url_contains. " +
+					"Do not include explanations.",
+			},
+			{
+				Role:    "user",
+				Content: "Goal:\n" + strings.TrimSpace(goal) + "\n\nState packet JSON:\n" + string(packetJSON),
+			},
+		},
+	}
+	raw, err := json.Marshal(reqPayload)
+	if err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("encode openai request: %w", err))
+	}
+
+	timeout := p.timeout
+	if timeout <= 0 {
+		timeout = 8 * time.Second
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, baseURL, bytes.NewReader(raw))
+	if err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("build openai request: %w", err))
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	httpClient := p.client
+	if httpClient == nil {
+		httpClient = &http.Client{}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("call openai planner: %w", err))
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("read openai response: %w", err))
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("openai planner status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body))))
+	}
+
+	var decoded openAIChatResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("decode openai response: %w", err))
+	}
+	if len(decoded.Choices) == 0 {
+		return p.planFallback(ctx, goal, snapshot, errors.New("openai planner returned no choices"))
+	}
+
+	content := strings.TrimSpace(decoded.Choices[0].Message.Content)
+	if content == "" {
+		return p.planFallback(ctx, goal, snapshot, errors.New("openai planner returned empty content"))
+	}
+	content = extractJSONObject(content)
+
+	var parsed endpointPlanResponse
+	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("decode openai actions payload: %w", err))
+	}
+
+	actions := parsed.Actions
+	if len(actions) == 0 && len(parsed.Plan.Actions) > 0 {
+		actions = parsed.Plan.Actions
+	}
+	actions = sanitizePlannedActions(actions)
+	if len(actions) == 0 {
+		return p.planFallback(ctx, goal, snapshot, errors.New("openai planner returned no valid actions"))
+	}
+	return actions, nil
+}
+
+func (p *openAIPlanner) planFallback(ctx context.Context, goal string, snapshot pageSnapshot, cause error) ([]executeAction, error) {
+	if p.fallback == nil {
+		return nil, cause
+	}
+	actions, err := p.fallback.Plan(ctx, goal, snapshot)
+	if err != nil {
+		return nil, cause
+	}
+	return actions, nil
+}
+
+func extractJSONObject(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return trimmed
+	}
+
+	trimmed = strings.TrimPrefix(trimmed, "```json")
+	trimmed = strings.TrimPrefix(trimmed, "```")
+	trimmed = strings.TrimSuffix(trimmed, "```")
+	trimmed = strings.TrimSpace(trimmed)
+
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start >= 0 && end > start {
+		return strings.TrimSpace(trimmed[start : end+1])
+	}
+	return trimmed
 }
 
 func (p *heuristicPlanner) Plan(_ context.Context, goal string, snapshot pageSnapshot) ([]executeAction, error) {
