@@ -84,6 +84,7 @@ func (e *traceErrorExecutor) Execute(_ context.Context, _ string, input nodeclie
 					Selector: "input[name='q']",
 				},
 				Status:     "succeeded",
+				OutputText: "ready",
 				DurationMS: 100,
 			},
 			{
@@ -507,6 +508,9 @@ func TestRunnerPersistsTraceFromExecutionErrorMetadata(t *testing.T) {
 	}
 	if failed.Trace[1].Action.Type != "click" {
 		t.Fatalf("expected second trace action click, got %q", failed.Trace[1].Action.Type)
+	}
+	if failed.Trace[0].OutputText != "ready" {
+		t.Fatalf("expected first trace step output_text to persist, got %q", failed.Trace[0].OutputText)
 	}
 	if failed.Trace[1].ScreenshotBase64 == "" {
 		t.Fatalf("expected step screenshot inline data when artifact store is not configured")
