@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/VenkatGGG/Browser-use/internal/pool"
 	"github.com/VenkatGGG/Browser-use/internal/session"
@@ -186,6 +187,85 @@ func TestDashboardRoute(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "Browser Use Control Room") {
 		t.Fatalf("dashboard response missing expected title")
+	}
+}
+
+func TestMetricsRoute(t *testing.T) {
+	registry := pool.NewInMemoryRegistry()
+	taskSvc := task.NewInMemoryService()
+	srv := NewServer(
+		session.NewInMemoryService(),
+		taskSvc,
+		registry,
+		nil,
+		1,
+		"",
+		nil,
+	)
+
+	_, _ = registry.Register(t.Context(), pool.RegisterInput{
+		NodeID:  "node-1",
+		Address: "node-1:9091",
+		Version: "dev",
+	})
+
+	completedTask, err := taskSvc.Create(t.Context(), task.CreateInput{
+		SessionID: "sess_a",
+		URL:       "https://example.com",
+		Goal:      "ok",
+	})
+	if err != nil {
+		t.Fatalf("create completed task: %v", err)
+	}
+	_, err = taskSvc.Complete(t.Context(), task.CompleteInput{
+		TaskID:    completedTask.ID,
+		NodeID:    "node-1",
+		Completed: completedTask.CreatedAt.Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	failedTask, err := taskSvc.Create(t.Context(), task.CreateInput{
+		SessionID: "sess_b",
+		URL:       "https://example.com/fail",
+		Goal:      "fail",
+	})
+	if err != nil {
+		t.Fatalf("create failed task: %v", err)
+	}
+	_, err = taskSvc.Fail(t.Context(), task.FailInput{
+		TaskID:         failedTask.ID,
+		Completed:      failedTask.CreatedAt.Add(3 * time.Second),
+		Error:          "blocked",
+		BlockerType:    "human_verification_required",
+		BlockerMessage: "captcha",
+	})
+	if err != nil {
+		t.Fatalf("fail task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics?limit=20", nil)
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected metrics status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Header().Get("Content-Type"), "text/plain") {
+		t.Fatalf("expected text/plain metrics content type, got %q", rr.Header().Get("Content-Type"))
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "browseruse_tasks_status_total{status=\"completed\"} 1") {
+		t.Fatalf("metrics body missing completed status count: %s", body)
+	}
+	if !strings.Contains(body, "browseruse_tasks_status_total{status=\"failed\"} 1") {
+		t.Fatalf("metrics body missing failed status count: %s", body)
+	}
+	if !strings.Contains(body, "browseruse_nodes_state_total{state=\"ready\"} 1") {
+		t.Fatalf("metrics body missing node ready count: %s", body)
+	}
+	if !strings.Contains(body, "browseruse_tasks_blocker_total{blocker_type=\"human_verification_required\"} 1") {
+		t.Fatalf("metrics body missing blocker count: %s", body)
 	}
 }
 

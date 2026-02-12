@@ -134,6 +134,10 @@ Local-first orchestration infrastructure for AI browser automation.
   - screenshot artifact preview modal and failure triage list
   - task submission form with reusable presets (session creation + queue task)
   - embedded HTML asset at `internal/api/assets/dashboard.html`
+- Added lightweight Prometheus-style metrics endpoint:
+  - `GET /metrics`
+  - task status totals, success/block rates, blocker totals, node state totals
+  - optional window control: `GET /metrics?limit=1000`
 
 ## Quick start
 
@@ -249,6 +253,16 @@ make test
 open http://localhost:8080/dashboard
 ```
 
+13. Poll metrics:
+```bash
+curl -sS http://localhost:8080/metrics
+```
+
+14. Run local soak test:
+```bash
+make soak-local
+```
+
 ## Development commands
 
 ```bash
@@ -265,6 +279,7 @@ make infra-up        # start only redis+postgres for host-run orchestrator
 make run-orchestrator-pool
 make dev-pool        # infra + browser image + host-run orchestrator with warm pool
 make clean-pool-nodes
+make soak-local      # enqueue/poll many tasks and print reliability summary
 ```
 
 ## Notes

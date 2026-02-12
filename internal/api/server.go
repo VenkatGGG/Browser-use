@@ -86,6 +86,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/", s.handleDashboard)
 	mux.HandleFunc("/dashboard", s.handleDashboard)
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/sessions", s.handleSessions)
 	mux.HandleFunc("/sessions/", s.handleSessionByID)
 	mux.HandleFunc("/v1/sessions", s.handleSessions)
