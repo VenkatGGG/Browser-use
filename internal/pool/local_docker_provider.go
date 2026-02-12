@@ -79,7 +79,7 @@ func NewLocalDockerProvider(cfg LocalDockerProviderConfig) (*LocalDockerProvider
 		cfg.ExecuteTimeout = 45 * time.Second
 	}
 	if strings.TrimSpace(cfg.PlannerMode) == "" {
-		cfg.PlannerMode = "heuristic"
+		cfg.PlannerMode = "template"
 	}
 	if cfg.PlannerTimeout <= 0 {
 		cfg.PlannerTimeout = 8 * time.Second

@@ -602,7 +602,7 @@ func loadConfig() config {
 		CDPBaseURL:         envOrDefault("NODE_AGENT_CDP_BASE_URL", "http://127.0.0.1:9222"),
 		RenderDelay:        durationOrDefault("NODE_AGENT_RENDER_DELAY", 2*time.Second),
 		ExecuteTimeout:     durationOrDefault("NODE_AGENT_EXECUTE_TIMEOUT", 45*time.Second),
-		PlannerMode:        envOrDefault("NODE_AGENT_PLANNER_MODE", "heuristic"),
+		PlannerMode:        envOrDefault("NODE_AGENT_PLANNER_MODE", "template"),
 		PlannerEndpoint:    strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_ENDPOINT_URL")),
 		PlannerAuthToken:   strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_AUTH_TOKEN")),
 		PlannerModel:       strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_MODEL")),

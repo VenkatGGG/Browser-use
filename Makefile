@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f deploy/compose/docker-compose.yml --env-file deploy/compose/.env
 
-.PHONY: up down logs ps test fmt proto run-orchestrator init-env preflight health
+.PHONY: up down logs ps test fmt proto run-orchestrator run-orchestrator-pool init-env preflight health infra-up infra-down build-browser-node-image dev-pool clean-pool-nodes
 
 init-env:
 	@if [ ! -f deploy/compose/.env ]; then cp deploy/compose/.env.example deploy/compose/.env; fi
@@ -47,3 +47,35 @@ proto:
 
 run-orchestrator:
 	go run ./cmd/orchestrator
+
+infra-up: preflight init-env
+	$(COMPOSE) up -d redis postgres
+
+infra-down:
+	$(COMPOSE) stop redis postgres
+
+build-browser-node-image: preflight
+	docker build -f docker/browser-node/Dockerfile -t browseruse-browser-node:latest .
+
+run-orchestrator-pool: init-env
+	@set -a; . deploy/compose/.env; set +a; \
+	REDIS_ADDR=$${REDIS_ADDR_LOCAL:-localhost:6379} \
+	POSTGRES_DSN=$${POSTGRES_DSN_LOCAL:-postgres://browseruse:browseruse@localhost:5432/browseruse?sslmode=disable} \
+	ORCHESTRATOR_POOL_ENABLED=true \
+	ORCHESTRATOR_POOL_TARGET_READY=$${ORCHESTRATOR_POOL_TARGET_READY:-2} \
+	ORCHESTRATOR_POOL_DOCKER_IMAGE=$${ORCHESTRATOR_POOL_DOCKER_IMAGE:-browseruse-browser-node:latest} \
+	ORCHESTRATOR_POOL_DOCKER_NETWORK=$${ORCHESTRATOR_POOL_DOCKER_NETWORK:-bridge} \
+	ORCHESTRATOR_POOL_ORCHESTRATOR_URL=$${ORCHESTRATOR_POOL_ORCHESTRATOR_URL:-http://host.docker.internal:8080} \
+	go run ./cmd/orchestrator
+
+dev-pool: infra-up build-browser-node-image
+	$(MAKE) run-orchestrator-pool
+
+clean-pool-nodes: preflight
+	@ids=$$(docker ps -aq --filter label=browseruse.managed=true); \
+	if [ -n "$$ids" ]; then \
+		docker rm -f $$ids >/dev/null; \
+		echo "removed managed pool containers"; \
+	else \
+		echo "no managed pool containers to remove"; \
+	fi

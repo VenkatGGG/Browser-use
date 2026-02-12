@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -73,6 +74,61 @@ func TestHeuristicPlannerReturnsNoActionsForUnsupportedGoal(t *testing.T) {
 	}
 	if len(actions) != 0 {
 		t.Fatalf("expected no actions, got %d", len(actions))
+	}
+}
+
+func TestTemplatePlannerBuildsPriceExtractionFlow(t *testing.T) {
+	t.Parallel()
+
+	planner := &templatePlanner{fallback: &heuristicPlanner{}}
+	snapshot := pageSnapshot{
+		URL:   "https://www.amazon.com",
+		Title: "Amazon",
+		Elements: []pageElement{
+			{Tag: "input", Type: "search", Name: "field-keywords", Selector: "input#twotabsearchtextbox", Width: 560, Height: 40},
+		},
+	}
+
+	actions, err := planner.Plan(context.Background(), `search for "think and grow rich" on amazon and give me the price`, snapshot)
+	if err != nil {
+		t.Fatalf("Plan returned error: %v", err)
+	}
+	if len(actions) < 5 {
+		t.Fatalf("expected at least 5 actions, got %d", len(actions))
+	}
+	last := actions[len(actions)-1]
+	if last.Type != "extract_text" {
+		t.Fatalf("expected final action extract_text, got %s", last.Type)
+	}
+	if last.Selector == "" || last.TimeoutMS <= 0 {
+		t.Fatalf("expected extract_text selector and timeout, got selector=%q timeout=%d", last.Selector, last.TimeoutMS)
+	}
+	if !strings.Contains(last.Selector, "a-price") {
+		t.Fatalf("expected amazon price selector, got %q", last.Selector)
+	}
+}
+
+func TestTemplatePlannerFallsBackToHeuristicForSimpleSearch(t *testing.T) {
+	t.Parallel()
+
+	planner := &templatePlanner{fallback: &heuristicPlanner{}}
+	snapshot := pageSnapshot{
+		URL:   "https://duckduckgo.com",
+		Title: "DuckDuckGo",
+		Elements: []pageElement{
+			{Tag: "input", Type: "search", Name: "q", Selector: "input[name=\"q\"]", Width: 500, Height: 40},
+		},
+	}
+
+	actions, err := planner.Plan(context.Background(), "search for browser use", snapshot)
+	if err != nil {
+		t.Fatalf("Plan returned error: %v", err)
+	}
+	if len(actions) == 0 {
+		t.Fatalf("expected non-empty fallback actions")
+	}
+	if actions[len(actions)-1].Type == "extract_text" {
+		t.Fatalf("did not expect extract_text for simple search flow")
 	}
 }
 
@@ -270,8 +326,14 @@ func TestNewActionPlannerSelectsExpectedMode(t *testing.T) {
 	if planner := newActionPlanner(plannerConfig{Mode: "off"}); planner != nil {
 		t.Fatalf("expected nil planner for off mode")
 	}
-	if planner := newActionPlanner(plannerConfig{Mode: "endpoint"}); planner == nil || planner.Name() != "heuristic" {
-		t.Fatalf("expected heuristic fallback when endpoint url is missing")
+	if planner := newActionPlanner(plannerConfig{}); planner == nil || planner.Name() != "template" {
+		t.Fatalf("expected template planner by default")
+	}
+	if planner := newActionPlanner(plannerConfig{Mode: "template"}); planner == nil || planner.Name() != "template" {
+		t.Fatalf("expected template planner for template mode")
+	}
+	if planner := newActionPlanner(plannerConfig{Mode: "endpoint"}); planner == nil || planner.Name() != "template" {
+		t.Fatalf("expected template fallback when endpoint url is missing")
 	}
 	if planner := newActionPlanner(plannerConfig{Mode: "endpoint", EndpointURL: "http://planner.local"}); planner == nil || planner.Name() != "endpoint" {
 		t.Fatalf("expected endpoint planner when endpoint url is provided")

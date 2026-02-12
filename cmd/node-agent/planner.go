@@ -9,6 +9,7 @@ import (
 	"hash/fnv"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -32,6 +33,9 @@ type actionPlanner interface {
 }
 
 type heuristicPlanner struct{}
+type templatePlanner struct {
+	fallback actionPlanner
+}
 type endpointPlanner struct {
 	endpointURL string
 	authToken   string
@@ -59,14 +63,19 @@ type endpointPlanResponse struct {
 func newActionPlanner(cfg plannerConfig) actionPlanner {
 	normalized := strings.ToLower(strings.TrimSpace(cfg.Mode))
 	heuristic := &heuristicPlanner{}
+	template := &templatePlanner{fallback: heuristic}
 
 	switch normalized {
-	case "", "heuristic":
+	case "", "template":
+		return template
+	case "heuristic":
 		return heuristic
+	case "goal", "goal_template", "template_plus":
+		return template
 	case "endpoint", "llm", "hybrid":
 		endpoint := strings.TrimSpace(cfg.EndpointURL)
 		if endpoint == "" {
-			return heuristic
+			return template
 		}
 		timeout := cfg.Timeout
 		if timeout <= 0 {
@@ -83,17 +92,21 @@ func newActionPlanner(cfg plannerConfig) actionPlanner {
 			timeout:     timeout,
 			maxElements: maxElements,
 			client:      &http.Client{},
-			fallback:    heuristic,
+			fallback:    template,
 		}
 	case "off":
 		return nil
 	default:
-		return heuristic
+		return template
 	}
 }
 
 func (p *heuristicPlanner) Name() string {
 	return "heuristic"
+}
+
+func (p *templatePlanner) Name() string {
+	return "template"
 }
 
 func (p *endpointPlanner) Name() string {
@@ -197,6 +210,62 @@ func (p *heuristicPlanner) Plan(_ context.Context, goal string, snapshot pageSna
 		{Type: "wait", DelayMS: 800},
 	}
 	return actions, nil
+}
+
+func (p *templatePlanner) Plan(ctx context.Context, goal string, snapshot pageSnapshot) ([]executeAction, error) {
+	trimmedGoal := strings.TrimSpace(goal)
+	if trimmedGoal == "" {
+		if p.fallback == nil {
+			return nil, nil
+		}
+		return p.fallback.Plan(ctx, goal, snapshot)
+	}
+
+	query := parseSearchQuery(trimmedGoal)
+	host := snapshotHost(snapshot.URL)
+	priceIntent := isPriceExtractionGoal(trimmedGoal)
+	extractIntent := isTextExtractionGoal(trimmedGoal)
+
+	actions := make([]executeAction, 0, 6)
+	if query != "" {
+		inputSelector := selectSearchInput(snapshot.Elements)
+		if inputSelector != "" {
+			actions = append(actions,
+				executeAction{Type: "wait_for", Selector: inputSelector, TimeoutMS: 8000},
+				executeAction{Type: "type", Selector: inputSelector, Text: query},
+				executeAction{Type: "press_enter", Selector: inputSelector},
+				executeAction{Type: "wait", DelayMS: 1200},
+			)
+		}
+	}
+
+	if priceIntent {
+		selector := priceExtractionSelector(host)
+		if selector != "" {
+			actions = append(actions, executeAction{
+				Type:      "extract_text",
+				Selector:  selector,
+				TimeoutMS: 10000,
+			})
+		}
+	} else if extractIntent {
+		selector := genericExtractionSelector(host, trimmedGoal)
+		if selector != "" {
+			actions = append(actions, executeAction{
+				Type:      "extract_text",
+				Selector:  selector,
+				TimeoutMS: 10000,
+			})
+		}
+	}
+
+	if len(actions) > 0 {
+		return actions, nil
+	}
+	if p.fallback == nil {
+		return nil, nil
+	}
+	return p.fallback.Plan(ctx, goal, snapshot)
 }
 
 type pageSnapshot struct {
@@ -550,6 +619,84 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func snapshotHost(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+}
+
+func isPriceExtractionGoal(goal string) bool {
+	lower := strings.ToLower(strings.TrimSpace(goal))
+	if lower == "" {
+		return false
+	}
+	priceTerms := []string{
+		"price",
+		"cost",
+		"how much",
+		"amount",
+	}
+	for _, term := range priceTerms {
+		if strings.Contains(lower, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTextExtractionGoal(goal string) bool {
+	lower := strings.ToLower(strings.TrimSpace(goal))
+	if lower == "" {
+		return false
+	}
+	terms := []string{
+		"extract",
+		"get me",
+		"tell me",
+		"find the",
+		"what is",
+	}
+	for _, term := range terms {
+		if strings.Contains(lower, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func priceExtractionSelector(host string) string {
+	switch {
+	case strings.Contains(host, "amazon."):
+		return "span.a-price span.a-offscreen, span[data-a-color='price'] span.a-offscreen, span.a-price-whole"
+	case strings.Contains(host, "flipkart."):
+		return "div.Nx9bqj, div._30jeq3, div._16Jk6d"
+	case strings.Contains(host, "ebay."):
+		return "div.x-price-primary span.ux-textspans, span[itemprop='price']"
+	default:
+		return "[itemprop='price'], [data-testid*='price'], .price, .product-price, .a-price .a-offscreen"
+	}
+}
+
+func genericExtractionSelector(host, goal string) string {
+	lowerGoal := strings.ToLower(strings.TrimSpace(goal))
+	switch {
+	case strings.Contains(lowerGoal, "title"), strings.Contains(lowerGoal, "name"):
+		if strings.Contains(host, "amazon.") {
+			return "span#productTitle, h2 span, h1"
+		}
+		return "h1, h2, [data-testid*='title'], [itemprop='name']"
+	case strings.Contains(lowerGoal, "rating"), strings.Contains(lowerGoal, "stars"), strings.Contains(lowerGoal, "review"):
+		if strings.Contains(host, "amazon.") {
+			return "span[data-hook='rating-out-of-text'], i.a-icon-star-small span.a-icon-alt, span.a-size-base.s-underline-text"
+		}
+		return "[itemprop='ratingValue'], [data-testid*='rating'], [class*='rating']"
+	default:
+		return ""
+	}
 }
 
 var (

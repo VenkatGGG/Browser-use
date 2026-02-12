@@ -91,7 +91,7 @@ func Load() Config {
 		PoolNodeCDPBaseURL:         envOrDefault("ORCHESTRATOR_POOL_NODE_CDP_BASE_URL", "http://127.0.0.1:9222"),
 		PoolNodeRenderDelay:        durationOrDefault("ORCHESTRATOR_POOL_NODE_RENDER_DELAY", 2*time.Second),
 		PoolNodeExecuteTimeout:     durationOrDefault("ORCHESTRATOR_POOL_NODE_EXECUTE_TIMEOUT", 45*time.Second),
-		PoolNodePlannerMode:        envOrDefault("ORCHESTRATOR_POOL_NODE_PLANNER_MODE", "heuristic"),
+		PoolNodePlannerMode:        envOrDefault("ORCHESTRATOR_POOL_NODE_PLANNER_MODE", "template"),
 		PoolNodePlannerEndpoint:    strings.TrimSpace(os.Getenv("ORCHESTRATOR_POOL_NODE_PLANNER_ENDPOINT_URL")),
 		PoolNodePlannerToken:       strings.TrimSpace(os.Getenv("ORCHESTRATOR_POOL_NODE_PLANNER_AUTH_TOKEN")),
 		PoolNodePlannerModel:       strings.TrimSpace(os.Getenv("ORCHESTRATOR_POOL_NODE_PLANNER_MODEL")),

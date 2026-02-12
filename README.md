@@ -93,7 +93,7 @@ Local-first orchestration infrastructure for AI browser automation.
     - `ORCHESTRATOR_TASK_RETRY_MAX_DELAY`
     - `ORCHESTRATOR_TASK_DOMAIN_BLOCK_COOLDOWN`
 - When `actions` is omitted, node-agent can auto-plan simple search flows from `goal`
-  using a lightweight page snapshot heuristic planner (`NODE_AGENT_PLANNER_MODE=heuristic`).
+  using a built-in template planner (`NODE_AGENT_PLANNER_MODE=template`).
 
 ### Phase 6 started (compact context planner path)
 - Node-agent now builds a compact planner state packet from visible interactive elements only:
@@ -109,6 +109,7 @@ Local-first orchestration infrastructure for AI browser automation.
     - `NODE_AGENT_PLANNER_TIMEOUT`
     - `NODE_AGENT_PLANNER_MAX_ELEMENTS`
 - Endpoint planner has safe fallback to deterministic heuristic planning on endpoint failures/invalid output.
+- Built-in template planner now handles common commerce extraction goals (for example: search + extract price) without external planner services.
 - Task records now persist execution trace steps (`trace`) including action payload, step status, timing, and failure reason when available.
 - Optional trace step screenshots can be enabled with `NODE_AGENT_TRACE_SCREENSHOTS=true` (or `ORCHESTRATOR_POOL_NODE_TRACE_SCREENSHOTS=true` for managed warm-pool nodes).
 
@@ -129,6 +130,11 @@ Local-first orchestration infrastructure for AI browser automation.
 1. Initialize env and boot the stack:
 ```bash
 make up
+```
+
+Alternative local warm-pool mode (host-run orchestrator + dynamic local sandboxes):
+```bash
+make dev-pool
 ```
 
 2. Validate API health:
@@ -245,6 +251,10 @@ make test            # run go tests
 make fmt             # gofmt all go files
 make proto           # generate go protobuf stubs
 make run-orchestrator
+make infra-up        # start only redis+postgres for host-run orchestrator
+make run-orchestrator-pool
+make dev-pool        # infra + browser image + host-run orchestrator with warm pool
+make clean-pool-nodes
 ```
 
 ## Notes
@@ -254,7 +264,7 @@ make run-orchestrator
 - Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
 - Task status payload now also includes `trace` for step-by-step execution visibility.
 - Supported deterministic action types include `wait_for`, `click`, `type`, `extract_text`, `scroll`, `wait`, `press_enter`, and `wait_for_url_contains`.
-- Planner mode defaults to `heuristic`; set `NODE_AGENT_PLANNER_MODE=endpoint` to call an external planner API using compact page state.
+- Planner mode defaults to `template`; set `NODE_AGENT_PLANNER_MODE=endpoint` to call an external planner API using compact page state.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
 - `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.
 - `Idempotency-Key` header is supported on `POST /v1/sessions` and `POST /v1/tasks`.
