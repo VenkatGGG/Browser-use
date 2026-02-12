@@ -302,7 +302,7 @@ make soak-local      # enqueue/poll many tasks and print reliability summary
 - Optional API safety controls:
   - `ORCHESTRATOR_API_KEY=<secret>` enforces API key auth on create/replay routes (`POST /sessions`, `POST /v1/sessions`, `POST /task`, `POST /v1/tasks`, `POST /v1/tasks/{id}/replay`).
   - Send key via `X-API-Key` (or `Authorization: Bearer <secret>`).
-  - `ORCHESTRATOR_RATE_LIMIT_PER_MINUTE=<N>` enables per-client fixed-window rate limiting on those same write routes.
+  - `ORCHESTRATOR_RATE_LIMIT_PER_MINUTE=<N>` enables per-client fixed-window rate limiting on those same write routes (including replay).
 - Node-agent now detects blocker pages (captcha/human verification/form validation), returns structured blocker metadata, and runner persists blocker evidence on failed tasks without retry loops.
 - Node-agent now performs a short blocker re-check for likely transient anti-bot interstitials (for example Cloudflare "checking your browser") before classifying a task as blocked.
 - Planner fallback behavior is now explicitly logged (planner mode, fallback planner, cause, and action count) for easier debugging of endpoint/OpenAI planner failures.

@@ -21,6 +21,12 @@ type fakeNodeRecycler struct {
 	err       error
 }
 
+type fakeDispatcher struct{}
+
+func (d *fakeDispatcher) Enqueue(_ context.Context, _ string) error {
+	return nil
+}
+
 func (f *fakeNodeRecycler) DestroyNode(_ context.Context, nodeID string) error {
 	if f.err != nil {
 		return f.err
@@ -337,6 +343,93 @@ func TestAPISecurityRateLimitOnCreateRoutes(t *testing.T) {
 	srv.Routes().ServeHTTP(healthRR, healthReq)
 	if healthRR.Code != http.StatusOK {
 		t.Fatalf("expected healthz status 200, got %d", healthRR.Code)
+	}
+}
+
+func TestAPISecurityRequiresAPIKeyOnReplayRoute(t *testing.T) {
+	sessionSvc := session.NewInMemoryService()
+	taskSvc := task.NewInMemoryService()
+	srv := NewServer(
+		sessionSvc,
+		taskSvc,
+		pool.NewInMemoryRegistry(),
+		&fakeDispatcher{},
+		1,
+		"",
+		nil,
+	)
+	srv.SetAPISecurity("topsecret", 0)
+
+	createdSession, err := sessionSvc.Create(t.Context(), session.CreateInput{TenantID: "secure-replay"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	originalTask, err := taskSvc.Create(t.Context(), task.CreateInput{
+		SessionID: createdSession.ID,
+		URL:       "https://example.com",
+		Goal:      "open",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	unauthorizedReq := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+originalTask.ID+"/replay", nil)
+	unauthorizedRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(unauthorizedRR, unauthorizedReq)
+	if unauthorizedRR.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without API key on replay, got %d body=%s", unauthorizedRR.Code, unauthorizedRR.Body.String())
+	}
+
+	authorizedReq := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+originalTask.ID+"/replay", nil)
+	authorizedReq.Header.Set("X-API-Key", "topsecret")
+	authorizedRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(authorizedRR, authorizedReq)
+	if authorizedRR.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 with API key on replay, got %d body=%s", authorizedRR.Code, authorizedRR.Body.String())
+	}
+}
+
+func TestAPISecurityRateLimitOnReplayRoute(t *testing.T) {
+	sessionSvc := session.NewInMemoryService()
+	taskSvc := task.NewInMemoryService()
+	srv := NewServer(
+		sessionSvc,
+		taskSvc,
+		pool.NewInMemoryRegistry(),
+		&fakeDispatcher{},
+		1,
+		"",
+		nil,
+	)
+	srv.SetAPISecurity("", 1)
+
+	createdSession, err := sessionSvc.Create(t.Context(), session.CreateInput{TenantID: "rate-replay"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	originalTask, err := taskSvc.Create(t.Context(), task.CreateInput{
+		SessionID: createdSession.ID,
+		URL:       "https://example.com",
+		Goal:      "open",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+originalTask.ID+"/replay", nil)
+	firstReq.RemoteAddr = "10.9.8.7:23456"
+	firstRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(firstRR, firstReq)
+	if firstRR.Code != http.StatusAccepted {
+		t.Fatalf("expected first replay 202, got %d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/tasks/"+originalTask.ID+"/replay", nil)
+	secondReq.RemoteAddr = "10.9.8.7:23456"
+	secondRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(secondRR, secondReq)
+	if secondRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected replay route to be rate limited with 429, got %d body=%s", secondRR.Code, secondRR.Body.String())
 	}
 }
 
