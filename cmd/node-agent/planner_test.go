@@ -106,6 +106,9 @@ func TestTemplatePlannerBuildsPriceExtractionFlow(t *testing.T) {
 	if !strings.Contains(last.Selector, "a-price") {
 		t.Fatalf("expected amazon price selector, got %q", last.Selector)
 	}
+	if last.Text != "price" {
+		t.Fatalf("expected extract hint text=price, got %q", last.Text)
+	}
 }
 
 func TestTemplatePlannerFallsBackToHeuristicForSimpleSearch(t *testing.T) {
@@ -417,5 +420,34 @@ func TestExtractJSONObject(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("extractJSONObject(%q)=%q want=%q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestSplitExtractSelectorCandidates(t *testing.T) {
+	t.Parallel()
+
+	got := splitExtractSelectorCandidates("span.price || .price || [itemprop='price']")
+	if len(got) != 3 {
+		t.Fatalf("expected 3 candidates, got %d (%v)", len(got), got)
+	}
+	if got[0] != "span.price" || got[2] != "[itemprop='price']" {
+		t.Fatalf("unexpected candidate split result: %v", got)
+	}
+}
+
+func TestIsExtractedValueValid(t *testing.T) {
+	t.Parallel()
+
+	if !isExtractedValueValid("price", "$19.99") {
+		t.Fatalf("expected valid price extraction")
+	}
+	if isExtractedValueValid("price", "product unavailable") {
+		t.Fatalf("expected invalid price extraction")
+	}
+	if !isExtractedValueValid("rating", "4.6 out of 5 stars") {
+		t.Fatalf("expected valid rating extraction")
+	}
+	if isExtractedValueValid("rating", "excellent quality") {
+		t.Fatalf("expected invalid rating extraction")
 	}
 }

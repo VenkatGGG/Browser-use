@@ -120,6 +120,9 @@ Local-first orchestration infrastructure for AI browser automation.
     - `NODE_AGENT_PLANNER_MAX_ELEMENTS`
 - Endpoint planner has safe fallback to deterministic heuristic planning on endpoint failures/invalid output.
 - Built-in template planner now handles common commerce extraction goals (for example: search + extract price) without external planner services.
+- Extraction robustness improved for planner-driven `extract_text` flows:
+  - ordered selector fallback attempts (`selector_a || selector_b || selector_c`)
+  - extraction-type hints (`price`, `rating`, `title`) with lightweight validation before accepting output
 - Task records now persist execution trace steps (`trace`) including action payload, step status, timing, and failure reason when available.
 - Optional trace step screenshots can be enabled with `NODE_AGENT_TRACE_SCREENSHOTS=true` (or `ORCHESTRATOR_POOL_NODE_TRACE_SCREENSHOTS=true` for managed warm-pool nodes).
 

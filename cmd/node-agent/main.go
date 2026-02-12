@@ -396,14 +396,43 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		if selector == "" {
 			return "", errors.New("selector is required for extract_text")
 		}
-		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
-			return "", err
+		candidates := splitExtractSelectorCandidates(selector)
+		if len(candidates) == 0 {
+			return "", errors.New("selector is required for extract_text")
 		}
-		text, err := client.ExtractText(actionCtx, selector)
-		if err != nil {
-			return "", err
+		expected := strings.ToLower(strings.TrimSpace(action.Text))
+		perCandidateTimeout := timeout / time.Duration(len(candidates))
+		if perCandidateTimeout < 1500*time.Millisecond {
+			perCandidateTimeout = minDuration(timeout, 1500*time.Millisecond)
 		}
-		return text, nil
+
+		attemptErrors := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			if err := client.WaitForSelector(actionCtx, candidate, perCandidateTimeout); err != nil {
+				attemptErrors = append(attemptErrors, fmt.Sprintf("%s: wait failed: %v", candidate, err))
+				continue
+			}
+			text, err := client.ExtractText(actionCtx, candidate)
+			if err != nil {
+				attemptErrors = append(attemptErrors, fmt.Sprintf("%s: extract failed: %v", candidate, err))
+				continue
+			}
+			normalized := strings.TrimSpace(text)
+			if normalized == "" {
+				attemptErrors = append(attemptErrors, fmt.Sprintf("%s: empty text", candidate))
+				continue
+			}
+			if !isExtractedValueValid(expected, normalized) {
+				attemptErrors = append(attemptErrors, fmt.Sprintf("%s: extracted text failed %s validation", candidate, expected))
+				continue
+			}
+			return normalized, nil
+		}
+
+		if len(attemptErrors) == 0 {
+			return "", errors.New("extract_text failed: no selectors were attempted")
+		}
+		return "", errors.New("extract_text failed: " + strings.Join(attemptErrors, " | "))
 	case "wait":
 		delay := time.Duration(action.DelayMS) * time.Millisecond
 		if delay <= 0 {
@@ -463,6 +492,90 @@ func actionTimeout(timeoutMS int) time.Duration {
 		return 12 * time.Second
 	}
 	return time.Duration(timeoutMS) * time.Millisecond
+}
+
+func splitExtractSelectorCandidates(selector string) []string {
+	trimmed := strings.TrimSpace(selector)
+	if trimmed == "" {
+		return nil
+	}
+	raw := strings.Split(trimmed, "||")
+	items := make([]string, 0, len(raw))
+	for _, part := range raw {
+		candidate := strings.TrimSpace(part)
+		if candidate != "" {
+			items = append(items, candidate)
+		}
+	}
+	if len(items) == 0 {
+		return []string{trimmed}
+	}
+	return items
+}
+
+func isExtractedValueValid(expected, value string) bool {
+	trimmedExpected := strings.ToLower(strings.TrimSpace(expected))
+	trimmedValue := strings.TrimSpace(value)
+	if trimmedValue == "" {
+		return false
+	}
+	if trimmedExpected == "" || trimmedExpected == "text" || trimmedExpected == "title" {
+		return true
+	}
+	switch trimmedExpected {
+	case "price":
+		return looksLikePrice(trimmedValue)
+	case "rating":
+		return looksLikeRating(trimmedValue)
+	default:
+		return true
+	}
+}
+
+func looksLikePrice(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return false
+	}
+	hasDigit := false
+	for _, ch := range lower {
+		if ch >= '0' && ch <= '9' {
+			hasDigit = true
+			break
+		}
+	}
+	if !hasDigit {
+		return false
+	}
+	for _, symbol := range []string{"$", "€", "£", "₹", "¥"} {
+		if strings.Contains(lower, symbol) {
+			return true
+		}
+	}
+	for _, code := range []string{"usd", "eur", "gbp", "inr", "cad", "aud"} {
+		if strings.Contains(lower, code) {
+			return true
+		}
+	}
+	return strings.Contains(lower, ".") || strings.Contains(lower, ",")
+}
+
+func looksLikeRating(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return false
+	}
+	hasDigit := false
+	for _, ch := range lower {
+		if ch >= '0' && ch <= '9' {
+			hasDigit = true
+			break
+		}
+	}
+	if !hasDigit {
+		return false
+	}
+	return strings.Contains(lower, "star") || strings.Contains(lower, "/5") || strings.Contains(lower, "out of")
 }
 
 func minDuration(a, b time.Duration) time.Duration {

@@ -441,6 +441,7 @@ func (p *templatePlanner) Plan(ctx context.Context, goal string, snapshot pageSn
 			actions = append(actions, executeAction{
 				Type:      "extract_text",
 				Selector:  selector,
+				Text:      "price",
 				TimeoutMS: 10000,
 			})
 		}
@@ -450,6 +451,7 @@ func (p *templatePlanner) Plan(ctx context.Context, goal string, snapshot pageSn
 			actions = append(actions, executeAction{
 				Type:      "extract_text",
 				Selector:  selector,
+				Text:      extractionHintFromGoal(trimmedGoal),
 				TimeoutMS: 10000,
 			})
 		}
@@ -867,13 +869,13 @@ func isTextExtractionGoal(goal string) bool {
 func priceExtractionSelector(host string) string {
 	switch {
 	case strings.Contains(host, "amazon."):
-		return "span.a-price span.a-offscreen, span[data-a-color='price'] span.a-offscreen, span.a-price-whole"
+		return "span.a-price span.a-offscreen || span[data-a-color='price'] span.a-offscreen || span.a-price-whole"
 	case strings.Contains(host, "flipkart."):
-		return "div.Nx9bqj, div._30jeq3, div._16Jk6d"
+		return "div.Nx9bqj || div._30jeq3 || div._16Jk6d"
 	case strings.Contains(host, "ebay."):
-		return "div.x-price-primary span.ux-textspans, span[itemprop='price']"
+		return "div.x-price-primary span.ux-textspans || span[itemprop='price']"
 	default:
-		return "[itemprop='price'], [data-testid*='price'], .price, .product-price, .a-price .a-offscreen"
+		return "[itemprop='price'] || [data-testid*='price'] || .price || .product-price || .a-price .a-offscreen"
 	}
 }
 
@@ -882,16 +884,30 @@ func genericExtractionSelector(host, goal string) string {
 	switch {
 	case strings.Contains(lowerGoal, "title"), strings.Contains(lowerGoal, "name"):
 		if strings.Contains(host, "amazon.") {
-			return "span#productTitle, h2 span, h1"
+			return "span#productTitle || h2 span || h1"
 		}
-		return "h1, h2, [data-testid*='title'], [itemprop='name']"
+		return "h1 || h2 || [data-testid*='title'] || [itemprop='name']"
 	case strings.Contains(lowerGoal, "rating"), strings.Contains(lowerGoal, "stars"), strings.Contains(lowerGoal, "review"):
 		if strings.Contains(host, "amazon.") {
-			return "span[data-hook='rating-out-of-text'], i.a-icon-star-small span.a-icon-alt, span.a-size-base.s-underline-text"
+			return "span[data-hook='rating-out-of-text'] || i.a-icon-star-small span.a-icon-alt || span.a-size-base.s-underline-text"
 		}
-		return "[itemprop='ratingValue'], [data-testid*='rating'], [class*='rating']"
+		return "[itemprop='ratingValue'] || [data-testid*='rating'] || [class*='rating']"
 	default:
 		return ""
+	}
+}
+
+func extractionHintFromGoal(goal string) string {
+	lower := strings.ToLower(strings.TrimSpace(goal))
+	switch {
+	case strings.Contains(lower, "price"), strings.Contains(lower, "cost"), strings.Contains(lower, "how much"), strings.Contains(lower, "amount"):
+		return "price"
+	case strings.Contains(lower, "rating"), strings.Contains(lower, "stars"), strings.Contains(lower, "review"):
+		return "rating"
+	case strings.Contains(lower, "title"), strings.Contains(lower, "name"):
+		return "title"
+	default:
+		return "text"
 	}
 }
 
