@@ -27,6 +27,11 @@ type LocalDockerProviderConfig struct {
 	RenderDelay        time.Duration
 	ExecuteTimeout     time.Duration
 	PlannerMode        string
+	PlannerEndpointURL string
+	PlannerAuthToken   string
+	PlannerModel       string
+	PlannerTimeout     time.Duration
+	PlannerMaxElements int
 	XVFBScreenGeometry string
 	ChromeDebugPort    int
 	DefaultMemoryLimit string
@@ -75,6 +80,12 @@ func NewLocalDockerProvider(cfg LocalDockerProviderConfig) (*LocalDockerProvider
 	if strings.TrimSpace(cfg.PlannerMode) == "" {
 		cfg.PlannerMode = "heuristic"
 	}
+	if cfg.PlannerTimeout <= 0 {
+		cfg.PlannerTimeout = 8 * time.Second
+	}
+	if cfg.PlannerMaxElements <= 0 {
+		cfg.PlannerMaxElements = 48
+	}
 	if strings.TrimSpace(cfg.XVFBScreenGeometry) == "" {
 		cfg.XVFBScreenGeometry = "1280x720x24"
 	}
@@ -105,20 +116,31 @@ func (p *LocalDockerProvider) ProvisionNode(ctx context.Context, input Provision
 	address := fmt.Sprintf("%s:%d", containerName, p.cfg.NodeGRPCPort)
 
 	envVars := map[string]string{
-		"NODE_AGENT_NODE_ID":            nodeID,
-		"NODE_AGENT_ADVERTISE_ADDR":     address,
-		"NODE_AGENT_ORCHESTRATOR_URL":   p.cfg.OrchestratorURL,
-		"NODE_AGENT_VERSION":            p.cfg.NodeVersion,
-		"NODE_AGENT_HTTP_ADDR":          fmt.Sprintf(":%d", p.cfg.NodeHTTPPort),
-		"NODE_AGENT_GRPC_ADDR":          fmt.Sprintf(":%d", p.cfg.NodeGRPCPort),
-		"NODE_AGENT_HEARTBEAT_INTERVAL": p.cfg.HeartbeatInterval.String(),
-		"NODE_AGENT_REQUEST_TIMEOUT":    p.cfg.RequestTimeout.String(),
-		"NODE_AGENT_CDP_BASE_URL":       p.cfg.CDPBaseURL,
-		"NODE_AGENT_RENDER_DELAY":       p.cfg.RenderDelay.String(),
-		"NODE_AGENT_EXECUTE_TIMEOUT":    p.cfg.ExecuteTimeout.String(),
-		"NODE_AGENT_PLANNER_MODE":       p.cfg.PlannerMode,
-		"CHROME_DEBUG_PORT":             fmt.Sprintf("%d", p.cfg.ChromeDebugPort),
-		"XVFB_SCREEN_GEOMETRY":          p.cfg.XVFBScreenGeometry,
+		"NODE_AGENT_NODE_ID":              nodeID,
+		"NODE_AGENT_ADVERTISE_ADDR":       address,
+		"NODE_AGENT_ORCHESTRATOR_URL":     p.cfg.OrchestratorURL,
+		"NODE_AGENT_VERSION":              p.cfg.NodeVersion,
+		"NODE_AGENT_HTTP_ADDR":            fmt.Sprintf(":%d", p.cfg.NodeHTTPPort),
+		"NODE_AGENT_GRPC_ADDR":            fmt.Sprintf(":%d", p.cfg.NodeGRPCPort),
+		"NODE_AGENT_HEARTBEAT_INTERVAL":   p.cfg.HeartbeatInterval.String(),
+		"NODE_AGENT_REQUEST_TIMEOUT":      p.cfg.RequestTimeout.String(),
+		"NODE_AGENT_CDP_BASE_URL":         p.cfg.CDPBaseURL,
+		"NODE_AGENT_RENDER_DELAY":         p.cfg.RenderDelay.String(),
+		"NODE_AGENT_EXECUTE_TIMEOUT":      p.cfg.ExecuteTimeout.String(),
+		"NODE_AGENT_PLANNER_MODE":         p.cfg.PlannerMode,
+		"NODE_AGENT_PLANNER_TIMEOUT":      p.cfg.PlannerTimeout.String(),
+		"NODE_AGENT_PLANNER_MAX_ELEMENTS": fmt.Sprintf("%d", p.cfg.PlannerMaxElements),
+		"CHROME_DEBUG_PORT":               fmt.Sprintf("%d", p.cfg.ChromeDebugPort),
+		"XVFB_SCREEN_GEOMETRY":            p.cfg.XVFBScreenGeometry,
+	}
+	if endpoint := strings.TrimSpace(p.cfg.PlannerEndpointURL); endpoint != "" {
+		envVars["NODE_AGENT_PLANNER_ENDPOINT_URL"] = endpoint
+	}
+	if token := strings.TrimSpace(p.cfg.PlannerAuthToken); token != "" {
+		envVars["NODE_AGENT_PLANNER_AUTH_TOKEN"] = token
+	}
+	if model := strings.TrimSpace(p.cfg.PlannerModel); model != "" {
+		envVars["NODE_AGENT_PLANNER_MODEL"] = model
 	}
 
 	args := []string{

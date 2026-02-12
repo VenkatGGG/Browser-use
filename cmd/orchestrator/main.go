@@ -86,6 +86,11 @@ func main() {
 			RenderDelay:        cfg.PoolNodeRenderDelay,
 			ExecuteTimeout:     cfg.PoolNodeExecuteTimeout,
 			PlannerMode:        cfg.PoolNodePlannerMode,
+			PlannerEndpointURL: cfg.PoolNodePlannerEndpoint,
+			PlannerAuthToken:   cfg.PoolNodePlannerToken,
+			PlannerModel:       cfg.PoolNodePlannerModel,
+			PlannerTimeout:     cfg.PoolNodePlannerTimeout,
+			PlannerMaxElements: cfg.PoolNodePlannerMaxElements,
 			XVFBScreenGeometry: cfg.PoolXVFBScreenGeometry,
 			ChromeDebugPort:    cfg.PoolChromeDebugPort,
 		})

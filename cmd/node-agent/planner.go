@@ -1,15 +1,30 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"hash/fnv"
+	"io"
+	"net/http"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/VenkatGGG/Browser-use/internal/cdp"
 )
+
+type plannerConfig struct {
+	Mode        string
+	EndpointURL string
+	AuthToken   string
+	Model       string
+	Timeout     time.Duration
+	MaxElements int
+}
 
 type actionPlanner interface {
 	Name() string
@@ -17,21 +32,150 @@ type actionPlanner interface {
 }
 
 type heuristicPlanner struct{}
+type endpointPlanner struct {
+	endpointURL string
+	authToken   string
+	model       string
+	timeout     time.Duration
+	maxElements int
+	client      *http.Client
+	fallback    actionPlanner
+}
 
-func newActionPlanner(mode string) actionPlanner {
-	normalized := strings.ToLower(strings.TrimSpace(mode))
+type endpointPlanRequest struct {
+	Goal           string             `json:"goal"`
+	Model          string             `json:"model,omitempty"`
+	AllowedActions []string           `json:"allowed_actions,omitempty"`
+	State          plannerStatePacket `json:"state"`
+}
+
+type endpointPlanResponse struct {
+	Actions []executeAction `json:"actions"`
+	Plan    struct {
+		Actions []executeAction `json:"actions"`
+	} `json:"plan"`
+}
+
+func newActionPlanner(cfg plannerConfig) actionPlanner {
+	normalized := strings.ToLower(strings.TrimSpace(cfg.Mode))
+	heuristic := &heuristicPlanner{}
+
 	switch normalized {
 	case "", "heuristic":
-		return &heuristicPlanner{}
+		return heuristic
+	case "endpoint", "llm", "hybrid":
+		endpoint := strings.TrimSpace(cfg.EndpointURL)
+		if endpoint == "" {
+			return heuristic
+		}
+		timeout := cfg.Timeout
+		if timeout <= 0 {
+			timeout = 8 * time.Second
+		}
+		maxElements := cfg.MaxElements
+		if maxElements <= 0 {
+			maxElements = 48
+		}
+		return &endpointPlanner{
+			endpointURL: endpoint,
+			authToken:   strings.TrimSpace(cfg.AuthToken),
+			model:       strings.TrimSpace(cfg.Model),
+			timeout:     timeout,
+			maxElements: maxElements,
+			client:      &http.Client{},
+			fallback:    heuristic,
+		}
 	case "off":
 		return nil
 	default:
-		return &heuristicPlanner{}
+		return heuristic
 	}
 }
 
 func (p *heuristicPlanner) Name() string {
 	return "heuristic"
+}
+
+func (p *endpointPlanner) Name() string {
+	return "endpoint"
+}
+
+func (p *endpointPlanner) Plan(ctx context.Context, goal string, snapshot pageSnapshot) ([]executeAction, error) {
+	endpoint := strings.TrimSpace(p.endpointURL)
+	if endpoint == "" {
+		return p.planFallback(ctx, goal, snapshot, errors.New("planner endpoint url is empty"))
+	}
+
+	reqPayload := endpointPlanRequest{
+		Goal:           strings.TrimSpace(goal),
+		Model:          strings.TrimSpace(p.model),
+		AllowedActions: allowedPlannerActions(),
+		State:          buildPlannerStatePacket(goal, snapshot, p.maxElements),
+	}
+	raw, err := json.Marshal(reqPayload)
+	if err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("marshal planner request: %w", err))
+	}
+
+	timeout := p.timeout
+	if timeout <= 0 {
+		timeout = 8 * time.Second
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, bytes.NewReader(raw))
+	if err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("build planner request: %w", err))
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token := strings.TrimSpace(p.authToken); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	httpClient := p.client
+	if httpClient == nil {
+		httpClient = &http.Client{}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("call planner endpoint: %w", err))
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("read planner endpoint response: %w", err))
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("planner endpoint status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body))))
+	}
+
+	var decoded endpointPlanResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return p.planFallback(ctx, goal, snapshot, fmt.Errorf("decode planner endpoint response: %w", err))
+	}
+
+	actions := decoded.Actions
+	if len(actions) == 0 && len(decoded.Plan.Actions) > 0 {
+		actions = decoded.Plan.Actions
+	}
+	actions = sanitizePlannedActions(actions)
+	if len(actions) == 0 {
+		return p.planFallback(ctx, goal, snapshot, errors.New("planner endpoint returned no valid actions"))
+	}
+	return actions, nil
+}
+
+func (p *endpointPlanner) planFallback(ctx context.Context, goal string, snapshot pageSnapshot, cause error) ([]executeAction, error) {
+	if p.fallback == nil {
+		return nil, cause
+	}
+	actions, err := p.fallback.Plan(ctx, goal, snapshot)
+	if err != nil {
+		return nil, cause
+	}
+	return actions, nil
 }
 
 func (p *heuristicPlanner) Plan(_ context.Context, goal string, snapshot pageSnapshot) ([]executeAction, error) {
@@ -56,12 +200,17 @@ func (p *heuristicPlanner) Plan(_ context.Context, goal string, snapshot pageSna
 }
 
 type pageSnapshot struct {
-	URL      string        `json:"url"`
-	Title    string        `json:"title"`
-	Elements []pageElement `json:"elements"`
+	URL            string        `json:"url"`
+	Title          string        `json:"title"`
+	ViewportWidth  int           `json:"viewport_width"`
+	ViewportHeight int           `json:"viewport_height"`
+	ScrollX        int           `json:"scroll_x"`
+	ScrollY        int           `json:"scroll_y"`
+	Elements       []pageElement `json:"elements"`
 }
 
 type pageElement struct {
+	StableID    string `json:"stable_id"`
 	Tag         string `json:"tag"`
 	Type        string `json:"type"`
 	Name        string `json:"name"`
@@ -71,8 +220,37 @@ type pageElement struct {
 	Role        string `json:"role"`
 	Text        string `json:"text"`
 	Selector    string `json:"selector"`
+	X           int    `json:"x"`
+	Y           int    `json:"y"`
 	Width       int    `json:"width"`
 	Height      int    `json:"height"`
+}
+
+type plannerStatePacket struct {
+	URL      string                `json:"url"`
+	Title    string                `json:"title"`
+	Goal     string                `json:"goal"`
+	Viewport plannerViewport       `json:"viewport"`
+	Elements []plannerStateElement `json:"elements"`
+}
+
+type plannerViewport struct {
+	Width   int `json:"width"`
+	Height  int `json:"height"`
+	ScrollX int `json:"scroll_x"`
+	ScrollY int `json:"scroll_y"`
+}
+
+type plannerStateElement struct {
+	ID       string `json:"id"`
+	Role     string `json:"role"`
+	Name     string `json:"name,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Selector string `json:"selector"`
+	X        int    `json:"x"`
+	Y        int    `json:"y"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
 }
 
 func capturePageSnapshot(ctx context.Context, client *cdp.Client) (pageSnapshot, error) {
@@ -136,6 +314,8 @@ func capturePageSnapshot(ctx context.Context, client *cdp.Client) (pageSnapshot,
 	      role: toText(el.getAttribute("role") || ""),
 	      text: toText(el.innerText || el.textContent || ""),
 	      selector,
+	      x: Math.round(rect.left),
+	      y: Math.round(rect.top),
 	      width: Math.round(rect.width),
 	      height: Math.round(rect.height)
 	    });
@@ -145,6 +325,10 @@ func capturePageSnapshot(ctx context.Context, client *cdp.Client) (pageSnapshot,
   return {
     url: String(window.location.href || ""),
     title: String(document.title || ""),
+    viewport_width: Math.round(window.innerWidth || 0),
+    viewport_height: Math.round(window.innerHeight || 0),
+    scroll_x: Math.round(window.scrollX || 0),
+    scroll_y: Math.round(window.scrollY || 0),
     elements: nodes
   };
 })()`
@@ -163,7 +347,207 @@ func capturePageSnapshot(ctx context.Context, client *cdp.Client) (pageSnapshot,
 	if err := json.Unmarshal(payload, &snapshot); err != nil {
 		return pageSnapshot{}, fmt.Errorf("decode page snapshot: %w", err)
 	}
+	assignStableElementIDs(&snapshot)
 	return snapshot, nil
+}
+
+func assignStableElementIDs(snapshot *pageSnapshot) {
+	for i := range snapshot.Elements {
+		snapshot.Elements[i].StableID = stableIDForElement(snapshot.Elements[i])
+	}
+}
+
+func stableIDForElement(element pageElement) string {
+	parts := []string{
+		strings.ToLower(strings.TrimSpace(element.Tag)),
+		strings.ToLower(strings.TrimSpace(element.Type)),
+		strings.ToLower(strings.TrimSpace(element.Name)),
+		strings.ToLower(strings.TrimSpace(element.ID)),
+		strings.ToLower(strings.TrimSpace(element.Placeholder)),
+		strings.ToLower(strings.TrimSpace(element.AriaLabel)),
+		strings.ToLower(strings.TrimSpace(element.Role)),
+		strings.ToLower(strings.TrimSpace(element.Text)),
+		strings.ToLower(strings.TrimSpace(element.Selector)),
+		fmt.Sprintf("%d", element.X),
+		fmt.Sprintf("%d", element.Y),
+		fmt.Sprintf("%d", element.Width),
+		fmt.Sprintf("%d", element.Height),
+	}
+	hasher := fnv.New32a()
+	_, _ = hasher.Write([]byte(strings.Join(parts, "|")))
+	return fmt.Sprintf("el_%08x", hasher.Sum32())
+}
+
+func buildPlannerStatePacket(goal string, snapshot pageSnapshot, maxElements int) plannerStatePacket {
+	limit := maxElements
+	if limit <= 0 {
+		limit = 48
+	}
+	if limit > 120 {
+		limit = 120
+	}
+
+	elements := make([]plannerStateElement, 0, minInt(len(snapshot.Elements), limit))
+	for _, element := range snapshot.Elements {
+		if len(elements) >= limit {
+			break
+		}
+
+		selector := strings.TrimSpace(element.Selector)
+		if selector == "" {
+			continue
+		}
+
+		role := firstNonEmptyString(strings.TrimSpace(element.Role), strings.TrimSpace(element.Type), strings.TrimSpace(element.Tag))
+		role = strings.ToLower(strings.TrimSpace(role))
+		if role == "" {
+			role = "interactive"
+		}
+
+		name := firstNonEmptyString(
+			strings.TrimSpace(element.AriaLabel),
+			strings.TrimSpace(element.Name),
+			strings.TrimSpace(element.Placeholder),
+			strings.TrimSpace(element.ID),
+		)
+
+		elements = append(elements, plannerStateElement{
+			ID:       firstNonEmptyString(strings.TrimSpace(element.StableID), stableIDForElement(element)),
+			Role:     trimSnippet(role, 32),
+			Name:     trimSnippet(name, 120),
+			Text:     trimSnippet(strings.TrimSpace(element.Text), 160),
+			Selector: trimSnippet(selector, 220),
+			X:        element.X,
+			Y:        element.Y,
+			Width:    element.Width,
+			Height:   element.Height,
+		})
+	}
+
+	return plannerStatePacket{
+		URL:   strings.TrimSpace(snapshot.URL),
+		Title: trimSnippet(strings.TrimSpace(snapshot.Title), 160),
+		Goal:  trimSnippet(strings.TrimSpace(goal), 220),
+		Viewport: plannerViewport{
+			Width:   snapshot.ViewportWidth,
+			Height:  snapshot.ViewportHeight,
+			ScrollX: snapshot.ScrollX,
+			ScrollY: snapshot.ScrollY,
+		},
+		Elements: elements,
+	}
+}
+
+func allowedPlannerActions() []string {
+	return []string{
+		"wait_for",
+		"click",
+		"type",
+		"scroll",
+		"wait",
+		"press_enter",
+		"submit_search",
+		"wait_for_url_contains",
+	}
+}
+
+func sanitizePlannedActions(actions []executeAction) []executeAction {
+	if len(actions) == 0 {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		"wait_for":              {},
+		"click":                 {},
+		"type":                  {},
+		"scroll":                {},
+		"wait":                  {},
+		"press_enter":           {},
+		"submit_search":         {},
+		"wait_for_url_contains": {},
+	}
+
+	cleaned := make([]executeAction, 0, len(actions))
+	for _, action := range actions {
+		typ := strings.ToLower(strings.TrimSpace(action.Type))
+		if _, ok := allowed[typ]; !ok {
+			continue
+		}
+
+		normalized := executeAction{
+			Type:      typ,
+			Selector:  strings.TrimSpace(action.Selector),
+			Text:      trimSnippet(strings.TrimSpace(action.Text), 320),
+			TimeoutMS: action.TimeoutMS,
+			DelayMS:   action.DelayMS,
+			Pixels:    action.Pixels,
+		}
+
+		if normalized.TimeoutMS < 0 {
+			normalized.TimeoutMS = 0
+		}
+		if normalized.TimeoutMS > 60000 {
+			normalized.TimeoutMS = 60000
+		}
+		if normalized.DelayMS < 0 {
+			normalized.DelayMS = 0
+		}
+		if normalized.DelayMS > 15000 {
+			normalized.DelayMS = 15000
+		}
+		if normalized.Pixels < 0 {
+			normalized.Pixels = 0
+		}
+		if normalized.Pixels > 3000 {
+			normalized.Pixels = 3000
+		}
+
+		switch typ {
+		case "wait_for", "click", "type", "press_enter", "submit_search":
+			if normalized.Selector == "" {
+				continue
+			}
+		case "wait_for_url_contains":
+			if normalized.Text == "" {
+				continue
+			}
+		case "scroll":
+			if normalized.Text == "" {
+				normalized.Text = "down"
+			}
+		}
+
+		cleaned = append(cleaned, normalized)
+		if len(cleaned) >= 12 {
+			break
+		}
+	}
+
+	return cleaned
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func trimSnippet(value string, max int) string {
+	normalized := spacesExpr.ReplaceAllString(strings.TrimSpace(value), " ")
+	if max <= 0 || len(normalized) <= max {
+		return normalized
+	}
+	return strings.TrimSpace(normalized[:max])
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 var (

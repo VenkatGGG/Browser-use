@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,18 +25,23 @@ import (
 )
 
 type config struct {
-	HTTPAddr          string
-	GRPCAddr          string
-	NodeID            string
-	Version           string
-	OrchestratorURL   string
-	AdvertiseAddr     string
-	HeartbeatInterval time.Duration
-	RequestTimeout    time.Duration
-	CDPBaseURL        string
-	RenderDelay       time.Duration
-	ExecuteTimeout    time.Duration
-	PlannerMode       string
+	HTTPAddr           string
+	GRPCAddr           string
+	NodeID             string
+	Version            string
+	OrchestratorURL    string
+	AdvertiseAddr      string
+	HeartbeatInterval  time.Duration
+	RequestTimeout     time.Duration
+	CDPBaseURL         string
+	RenderDelay        time.Duration
+	ExecuteTimeout     time.Duration
+	PlannerMode        string
+	PlannerEndpoint    string
+	PlannerAuthToken   string
+	PlannerModel       string
+	PlannerTimeout     time.Duration
+	PlannerMaxElements int
 }
 
 type registerNodeRequest struct {
@@ -87,7 +93,14 @@ func newBrowserExecutor(cfg config) *browserExecutor {
 		cdpBaseURL:     cfg.CDPBaseURL,
 		renderDelay:    cfg.RenderDelay,
 		executeTimeout: cfg.ExecuteTimeout,
-		planner:        newActionPlanner(cfg.PlannerMode),
+		planner: newActionPlanner(plannerConfig{
+			Mode:        cfg.PlannerMode,
+			EndpointURL: cfg.PlannerEndpoint,
+			AuthToken:   cfg.PlannerAuthToken,
+			Model:       cfg.PlannerModel,
+			Timeout:     cfg.PlannerTimeout,
+			MaxElements: cfg.PlannerMaxElements,
+		}),
 	}
 }
 
@@ -476,18 +489,23 @@ func loadConfig() config {
 	}
 
 	return config{
-		HTTPAddr:          httpAddr,
-		GRPCAddr:          grpcAddr,
-		NodeID:            nodeID,
-		Version:           envOrDefault("NODE_AGENT_VERSION", "dev"),
-		OrchestratorURL:   strings.TrimSuffix(strings.TrimSpace(os.Getenv("NODE_AGENT_ORCHESTRATOR_URL")), "/"),
-		AdvertiseAddr:     advertise,
-		HeartbeatInterval: durationOrDefault("NODE_AGENT_HEARTBEAT_INTERVAL", 5*time.Second),
-		RequestTimeout:    durationOrDefault("NODE_AGENT_REQUEST_TIMEOUT", 5*time.Second),
-		CDPBaseURL:        envOrDefault("NODE_AGENT_CDP_BASE_URL", "http://127.0.0.1:9222"),
-		RenderDelay:       durationOrDefault("NODE_AGENT_RENDER_DELAY", 2*time.Second),
-		ExecuteTimeout:    durationOrDefault("NODE_AGENT_EXECUTE_TIMEOUT", 45*time.Second),
-		PlannerMode:       envOrDefault("NODE_AGENT_PLANNER_MODE", "heuristic"),
+		HTTPAddr:           httpAddr,
+		GRPCAddr:           grpcAddr,
+		NodeID:             nodeID,
+		Version:            envOrDefault("NODE_AGENT_VERSION", "dev"),
+		OrchestratorURL:    strings.TrimSuffix(strings.TrimSpace(os.Getenv("NODE_AGENT_ORCHESTRATOR_URL")), "/"),
+		AdvertiseAddr:      advertise,
+		HeartbeatInterval:  durationOrDefault("NODE_AGENT_HEARTBEAT_INTERVAL", 5*time.Second),
+		RequestTimeout:     durationOrDefault("NODE_AGENT_REQUEST_TIMEOUT", 5*time.Second),
+		CDPBaseURL:         envOrDefault("NODE_AGENT_CDP_BASE_URL", "http://127.0.0.1:9222"),
+		RenderDelay:        durationOrDefault("NODE_AGENT_RENDER_DELAY", 2*time.Second),
+		ExecuteTimeout:     durationOrDefault("NODE_AGENT_EXECUTE_TIMEOUT", 45*time.Second),
+		PlannerMode:        envOrDefault("NODE_AGENT_PLANNER_MODE", "heuristic"),
+		PlannerEndpoint:    strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_ENDPOINT_URL")),
+		PlannerAuthToken:   strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_AUTH_TOKEN")),
+		PlannerModel:       strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_MODEL")),
+		PlannerTimeout:     durationOrDefault("NODE_AGENT_PLANNER_TIMEOUT", 8*time.Second),
+		PlannerMaxElements: intOrDefault("NODE_AGENT_PLANNER_MAX_ELEMENTS", 48),
 	}
 }
 
@@ -638,6 +656,18 @@ func durationOrDefault(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func intOrDefault(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
 	if err != nil {
 		return fallback
 	}

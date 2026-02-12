@@ -94,6 +94,21 @@ Local-first orchestration infrastructure for AI browser automation.
 - When `actions` is omitted, node-agent can auto-plan simple search flows from `goal`
   using a lightweight page snapshot heuristic planner (`NODE_AGENT_PLANNER_MODE=heuristic`).
 
+### Phase 6 started (compact context planner path)
+- Node-agent now builds a compact planner state packet from visible interactive elements only:
+  - stable element ids (`stable_id`)
+  - role/name/text/selector
+  - viewport coordinates + dimensions
+- Added optional external planner mode:
+  - `NODE_AGENT_PLANNER_MODE=endpoint`
+  - `NODE_AGENT_PLANNER_ENDPOINT_URL=<planner-api>`
+  - optional auth/model controls:
+    - `NODE_AGENT_PLANNER_AUTH_TOKEN`
+    - `NODE_AGENT_PLANNER_MODEL`
+    - `NODE_AGENT_PLANNER_TIMEOUT`
+    - `NODE_AGENT_PLANNER_MAX_ELEMENTS`
+- Endpoint planner has safe fallback to deterministic heuristic planning on endpoint failures/invalid output.
+
 ### Phase 4 started (dashboard)
 - Orchestrator now serves a live dashboard at `GET /dashboard`.
 - Dashboard includes:
@@ -215,8 +230,8 @@ make run-orchestrator
 - Queued tasks are reconciled from Postgres on runner startup/restart.
 - Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
-- Supported deterministic action types include `wait_for`, `click`, `type`, `wait`, `press_enter`, and `wait_for_url_contains`.
 - Supported deterministic action types include `wait_for`, `click`, `type`, `scroll`, `wait`, `press_enter`, and `wait_for_url_contains`.
+- Planner mode defaults to `heuristic`; set `NODE_AGENT_PLANNER_MODE=endpoint` to call an external planner API using compact page state.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
 - `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.
 - `Idempotency-Key` header is supported on `POST /v1/sessions` and `POST /v1/tasks`.

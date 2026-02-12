@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestParseSearchQuery(t *testing.T) {
@@ -121,5 +125,155 @@ func TestBestSelectorForElementPriority(t *testing.T) {
 				t.Fatalf("bestSelectorForElement mismatch: got=%q want=%q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestBuildPlannerStatePacketCompactsAndLimitsElements(t *testing.T) {
+	t.Parallel()
+
+	snapshot := pageSnapshot{
+		URL:            "https://example.com",
+		Title:          "Example",
+		ViewportWidth:  1280,
+		ViewportHeight: 720,
+		ScrollX:        10,
+		ScrollY:        20,
+		Elements: []pageElement{
+			{
+				StableID:    "el_a",
+				Tag:         "input",
+				Type:        "search",
+				Name:        "q",
+				Placeholder: "Search",
+				Selector:    "input[name=\"q\"]",
+				X:           100,
+				Y:           200,
+				Width:       400,
+				Height:      40,
+			},
+			{
+				StableID: "el_b",
+				Tag:      "button",
+				Text:     "Search",
+				Selector: "button[type=\"submit\"]",
+				X:        520,
+				Y:        200,
+				Width:    100,
+				Height:   40,
+			},
+		},
+	}
+
+	packet := buildPlannerStatePacket("search for browser use", snapshot, 1)
+	if len(packet.Elements) != 1 {
+		t.Fatalf("expected 1 compact element, got %d", len(packet.Elements))
+	}
+	if packet.Elements[0].ID != "el_a" {
+		t.Fatalf("unexpected compact element id: %s", packet.Elements[0].ID)
+	}
+	if packet.Viewport.Width != 1280 || packet.Viewport.Height != 720 {
+		t.Fatalf("unexpected viewport dimensions: %+v", packet.Viewport)
+	}
+	if packet.Viewport.ScrollX != 10 || packet.Viewport.ScrollY != 20 {
+		t.Fatalf("unexpected viewport scroll offsets: %+v", packet.Viewport)
+	}
+}
+
+func TestEndpointPlannerUsesEndpointActions(t *testing.T) {
+	t.Parallel()
+
+	var captured endpointPlanRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"actions": []map[string]any{
+				{"type": "wait", "delay_ms": 600},
+			},
+		})
+	}))
+	defer server.Close()
+
+	planner := &endpointPlanner{
+		endpointURL: server.URL,
+		timeout:     2 * time.Second,
+		maxElements: 10,
+		client:      server.Client(),
+		fallback:    &heuristicPlanner{},
+	}
+
+	snapshot := pageSnapshot{
+		URL:   "https://example.com",
+		Title: "Example",
+		Elements: []pageElement{
+			{Tag: "button", Text: "Continue", Selector: "button.primary", StableID: "el_1", Width: 90, Height: 32},
+		},
+	}
+	actions, err := planner.Plan(context.Background(), "continue", snapshot)
+	if err != nil {
+		t.Fatalf("Plan returned error: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Type != "wait" {
+		t.Fatalf("unexpected endpoint actions: %+v", actions)
+	}
+	if captured.Goal != "continue" {
+		t.Fatalf("expected goal in endpoint payload, got %q", captured.Goal)
+	}
+	if len(captured.State.Elements) != 1 {
+		t.Fatalf("expected compact state elements in payload, got %d", len(captured.State.Elements))
+	}
+}
+
+func TestEndpointPlannerFallsBackToHeuristicOnEndpointFailure(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	planner := &endpointPlanner{
+		endpointURL: server.URL,
+		timeout:     2 * time.Second,
+		maxElements: 10,
+		client:      server.Client(),
+		fallback:    &heuristicPlanner{},
+	}
+
+	snapshot := pageSnapshot{
+		URL:   "https://duckduckgo.com",
+		Title: "DuckDuckGo",
+		Elements: []pageElement{
+			{Tag: "input", Type: "search", Name: "q", Selector: "input[name=\"q\"]", Width: 480, Height: 42},
+		},
+	}
+
+	actions, err := planner.Plan(context.Background(), "search for browser use", snapshot)
+	if err != nil {
+		t.Fatalf("expected fallback planner to succeed, got error: %v", err)
+	}
+	if len(actions) == 0 {
+		t.Fatalf("expected fallback heuristic actions, got none")
+	}
+	if actions[0].Type != "wait_for" {
+		t.Fatalf("expected first fallback action wait_for, got %s", actions[0].Type)
+	}
+}
+
+func TestNewActionPlannerSelectsExpectedMode(t *testing.T) {
+	t.Parallel()
+
+	if planner := newActionPlanner(plannerConfig{Mode: "off"}); planner != nil {
+		t.Fatalf("expected nil planner for off mode")
+	}
+	if planner := newActionPlanner(plannerConfig{Mode: "endpoint"}); planner == nil || planner.Name() != "heuristic" {
+		t.Fatalf("expected heuristic fallback when endpoint url is missing")
+	}
+	if planner := newActionPlanner(plannerConfig{Mode: "endpoint", EndpointURL: "http://planner.local"}); planner == nil || planner.Name() != "endpoint" {
+		t.Fatalf("expected endpoint planner when endpoint url is provided")
 	}
 }
