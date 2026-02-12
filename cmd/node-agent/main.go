@@ -61,6 +61,7 @@ type executeAction struct {
 	Type      string `json:"type"`
 	Selector  string `json:"selector,omitempty"`
 	Text      string `json:"text,omitempty"`
+	Pixels    int    `json:"pixels,omitempty"`
 	TimeoutMS int    `json:"timeout_ms,omitempty"`
 	DelayMS   int    `json:"delay_ms,omitempty"`
 }
@@ -253,6 +254,9 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		if selector == "" {
 			return errors.New("selector is required for click")
 		}
+		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
+			return err
+		}
 		return client.ClickSelector(actionCtx, selector)
 	case "type":
 		selector := strings.TrimSpace(action.Selector)
@@ -263,6 +267,28 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 			return err
 		}
 		if err := client.TypeIntoSelector(actionCtx, selector, action.Text); err != nil {
+			return err
+		}
+		if strings.TrimSpace(action.Text) != "" {
+			if err := client.WaitForSelectorValueContains(actionCtx, selector, action.Text, timeout); err != nil {
+				return err
+			}
+		}
+		if action.DelayMS > 0 {
+			delay := time.Duration(action.DelayMS) * time.Millisecond
+			select {
+			case <-actionCtx.Done():
+				return actionCtx.Err()
+			case <-time.After(delay):
+			}
+		}
+		return nil
+	case "scroll":
+		direction := strings.TrimSpace(action.Text)
+		if direction == "" {
+			direction = "down"
+		}
+		if err := client.Scroll(actionCtx, direction, action.Pixels); err != nil {
 			return err
 		}
 		if action.DelayMS > 0 {
@@ -293,7 +319,14 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
 			return err
 		}
-		return client.PressEnterOnSelector(actionCtx, selector)
+		previousURL, _ := client.EvaluateString(actionCtx, "window.location.href")
+		if err := client.PressEnterOnSelector(actionCtx, selector); err != nil {
+			return err
+		}
+		if strings.TrimSpace(previousURL) != "" {
+			_, _ = client.WaitForURLChange(actionCtx, previousURL, minDuration(timeout, 1500*time.Millisecond))
+		}
+		return nil
 	case "submit_search":
 		selector := strings.TrimSpace(action.Selector)
 		if selector == "" {
@@ -302,7 +335,14 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
 			return err
 		}
-		return client.PressEnterOnSelector(actionCtx, selector)
+		previousURL, _ := client.EvaluateString(actionCtx, "window.location.href")
+		if err := client.PressEnterOnSelector(actionCtx, selector); err != nil {
+			return err
+		}
+		if strings.TrimSpace(previousURL) != "" {
+			_, _ = client.WaitForURLChange(actionCtx, previousURL, minDuration(timeout, 1500*time.Millisecond))
+		}
+		return nil
 	case "wait_for_url_contains":
 		fragment := strings.TrimSpace(action.Text)
 		if fragment == "" {
@@ -319,6 +359,19 @@ func actionTimeout(timeoutMS int) time.Duration {
 		return 12 * time.Second
 	}
 	return time.Duration(timeoutMS) * time.Millisecond
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a <= 0 {
+		return b
+	}
+	if b <= 0 {
+		return a
+	}
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func summarizeActions(actions []executeAction) string {

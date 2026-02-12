@@ -15,6 +15,7 @@ type Action struct {
 	Type      string `json:"type"`
 	Selector  string `json:"selector,omitempty"`
 	Text      string `json:"text,omitempty"`
+	Pixels    int    `json:"pixels,omitempty"`
 	TimeoutMS int    `json:"timeout_ms,omitempty"`
 	DelayMS   int    `json:"delay_ms,omitempty"`
 }

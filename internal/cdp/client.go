@@ -223,6 +223,43 @@ func (c *Client) WaitForURLContains(ctx context.Context, fragment string, timeou
 	}
 }
 
+func (c *Client) WaitForURLChange(ctx context.Context, previousURL string, timeout time.Duration) (string, error) {
+	previousURL = strings.TrimSpace(previousURL)
+	if previousURL == "" {
+		return "", errors.New("previous url is required")
+	}
+	if timeout <= 0 {
+		timeout = defaultSelectorTimeout
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	expression := fmt.Sprintf(`(() => {
+	const previous = %q;
+	const current = String(window.location.href || "");
+	if (current && current !== previous) return current;
+	return "";
+	})()`, previousURL)
+
+	for {
+		value, err := c.EvaluateAny(waitCtx, expression)
+		if err != nil {
+			return "", err
+		}
+		current := strings.TrimSpace(fmt.Sprint(value))
+		if current != "" {
+			return current, nil
+		}
+
+		select {
+		case <-waitCtx.Done():
+			return "", fmt.Errorf("timeout waiting for URL to change from %q", previousURL)
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
 func (c *Client) ClickSelector(ctx context.Context, selector string) error {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
@@ -252,6 +289,80 @@ func (c *Client) ClickSelector(ctx context.Context, selector string) error {
 		return fmt.Errorf("click failed: %s", result)
 	}
 	return nil
+}
+
+func (c *Client) IsSelectorFocused(ctx context.Context, selector string) (bool, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return false, errors.New("selector is required")
+	}
+
+	expression := fmt.Sprintf(`(() => {
+	const visible = (node) => {
+		const style = window.getComputedStyle(node);
+		if (!style || style.display === "none" || style.visibility === "hidden") return false;
+		const rect = node.getBoundingClientRect();
+		return rect.width > 1 && rect.height > 1;
+	};
+	const el = Array.from(document.querySelectorAll(%q)).find(visible);
+	if (!el) return false;
+	return document.activeElement === el;
+	})()`, selector)
+
+	value, err := c.EvaluateAny(ctx, expression)
+	if err != nil {
+		return false, err
+	}
+	focused, ok := value.(bool)
+	return ok && focused, nil
+}
+
+func (c *Client) WaitForSelectorValueContains(ctx context.Context, selector, want string, timeout time.Duration) error {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return errors.New("selector is required")
+	}
+	if timeout <= 0 {
+		timeout = defaultSelectorTimeout
+	}
+
+	wantLower := strings.ToLower(want)
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	expression := fmt.Sprintf(`(() => {
+	const visible = (node) => {
+		const style = window.getComputedStyle(node);
+		if (!style || style.display === "none" || style.visibility === "hidden") return false;
+		const rect = node.getBoundingClientRect();
+		return rect.width > 1 && rect.height > 1;
+	};
+	const el = Array.from(document.querySelectorAll(%q)).find(visible);
+	if (!el) return false;
+	let value = "";
+	if ("value" in el) {
+		value = String(el.value || "");
+	} else {
+		value = String(el.textContent || "");
+	}
+	return value.toLowerCase().includes(%q);
+	})()`, selector, wantLower)
+
+	for {
+		value, err := c.EvaluateAny(waitCtx, expression)
+		if err != nil {
+			return err
+		}
+		if matched, ok := value.(bool); ok && matched {
+			return nil
+		}
+
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("timeout waiting for selector %q value to include %q", selector, want)
+		case <-time.After(pollInterval):
+		}
+	}
 }
 
 func (c *Client) TypeIntoSelector(ctx context.Context, selector, text string) error {
@@ -287,6 +398,52 @@ func (c *Client) TypeIntoSelector(ctx context.Context, selector, text string) er
 	}
 	if err := c.Call(ctx, "Input.insertText", map[string]any{"text": text}, nil); err != nil {
 		return fmt.Errorf("type failed: insert text: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) Scroll(ctx context.Context, direction string, pixels int) error {
+	dir := strings.ToLower(strings.TrimSpace(direction))
+	if dir == "" {
+		dir = "down"
+	}
+	if pixels <= 0 {
+		pixels = 600
+	}
+	if pixels > 3000 {
+		pixels = 3000
+	}
+
+	expression := fmt.Sprintf(`(() => {
+	const dir = %q;
+	const amount = %d;
+	if (dir === "top") {
+		window.scrollTo({top: 0, behavior: "instant"});
+		return "ok";
+	}
+	if (dir === "bottom") {
+		const h = Math.max(
+			document.body ? document.body.scrollHeight : 0,
+			document.documentElement ? document.documentElement.scrollHeight : 0
+		);
+		window.scrollTo({top: h, behavior: "instant"});
+		return "ok";
+	}
+	const delta = (dir === "up" || dir === "left") ? -amount : amount;
+	if (dir === "left" || dir === "right") {
+		window.scrollBy({left: delta, behavior: "instant"});
+		return "ok";
+	}
+	window.scrollBy({top: delta, behavior: "instant"});
+	return "ok";
+	})()`, dir, pixels)
+
+	result, err := c.EvaluateString(ctx, expression)
+	if err != nil {
+		return err
+	}
+	if result != "ok" {
+		return fmt.Errorf("scroll failed: %s", result)
 	}
 	return nil
 }

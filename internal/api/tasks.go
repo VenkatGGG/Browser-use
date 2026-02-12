@@ -20,6 +20,7 @@ type taskActionRequest struct {
 	Type      string `json:"type"`
 	Selector  string `json:"selector,omitempty"`
 	Text      string `json:"text,omitempty"`
+	Pixels    int    `json:"pixels,omitempty"`
 	TimeoutMS int    `json:"timeout_ms,omitempty"`
 	DelayMS   int    `json:"delay_ms,omitempty"`
 }
@@ -462,6 +463,7 @@ func mapTaskActions(actions []taskActionRequest) []task.Action {
 			Type:      strings.TrimSpace(action.Type),
 			Selector:  strings.TrimSpace(action.Selector),
 			Text:      action.Text,
+			Pixels:    action.Pixels,
 			TimeoutMS: action.TimeoutMS,
 			DelayMS:   action.DelayMS,
 		})

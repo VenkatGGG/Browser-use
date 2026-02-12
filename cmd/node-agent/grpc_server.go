@@ -132,6 +132,13 @@ func toExecuteAction(actionType string, params map[string]string) (executeAction
 		}
 		action.DelayMS = delay
 	}
+	if pixelsRaw := strings.TrimSpace(params["pixels"]); pixelsRaw != "" {
+		pixels, err := strconv.Atoi(pixelsRaw)
+		if err != nil {
+			return executeAction{}, status.Errorf(codes.InvalidArgument, "invalid pixels: %s", pixelsRaw)
+		}
+		action.Pixels = pixels
+	}
 
 	return action, nil
 }
