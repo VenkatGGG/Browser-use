@@ -28,6 +28,29 @@ func (d *recordingDispatcher) Enqueue(_ context.Context, taskID string) error {
 	return d.err
 }
 
+type immediateCompleteDispatcher struct {
+	svc task.Service
+}
+
+func (d *immediateCompleteDispatcher) Enqueue(_ context.Context, taskID string) error {
+	go func() {
+		time.Sleep(25 * time.Millisecond)
+		_, _ = d.svc.Start(context.Background(), task.StartInput{
+			TaskID:  taskID,
+			NodeID:  "node-1",
+			Started: time.Now().UTC(),
+		})
+		_, _ = d.svc.Complete(context.Background(), task.CompleteInput{
+			TaskID:    taskID,
+			NodeID:    "node-1",
+			Completed: time.Now().UTC(),
+			PageTitle: "done",
+			FinalURL:  "https://example.com/done",
+		})
+	}()
+	return nil
+}
+
 func TestCreateTaskWithActionsQueued(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
 	srv := NewServer(
@@ -234,6 +257,84 @@ func TestCreateTaskMaxRetriesOverride(t *testing.T) {
 	}
 	if created.MaxRetries != 5 {
 		t.Fatalf("expected max_retries 5, got %d", created.MaxRetries)
+	}
+}
+
+func TestCreateTaskWaitForCompletionReturnsTerminalTask(t *testing.T) {
+	svc := task.NewInMemoryService()
+	dispatcher := &immediateCompleteDispatcher{svc: svc}
+	srv := NewServer(
+		session.NewInMemoryService(),
+		svc,
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	body := []byte(`{
+		"session_id":"sess_wait",
+		"url":"https://example.com",
+		"goal":"open and complete",
+		"wait_for_completion":true,
+		"wait_timeout_ms":3000
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected task status 200 when waited to terminal, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var found task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &found); err != nil {
+		t.Fatalf("decode task response: %v", err)
+	}
+	if found.Status != task.StatusCompleted {
+		t.Fatalf("expected completed task, got %s", found.Status)
+	}
+	if found.PageTitle != "done" {
+		t.Fatalf("expected completed metadata, got title=%q", found.PageTitle)
+	}
+}
+
+func TestCreateTaskWaitForCompletionTimeoutReturnsAccepted(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	body := []byte(`{
+		"session_id":"sess_wait",
+		"url":"https://example.com",
+		"goal":"open and complete",
+		"wait_for_completion":true,
+		"wait_timeout_ms":1000
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected task status 202 on wait timeout, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var found task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &found); err != nil {
+		t.Fatalf("decode task response: %v", err)
+	}
+	if found.Status != task.StatusQueued {
+		t.Fatalf("expected queued task on timeout, got %s", found.Status)
 	}
 }
 

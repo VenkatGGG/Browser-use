@@ -26,11 +26,13 @@ type taskActionRequest struct {
 }
 
 type createTaskRequest struct {
-	SessionID  string              `json:"session_id"`
-	URL        string              `json:"url"`
-	Goal       string              `json:"goal"`
-	Actions    []taskActionRequest `json:"actions,omitempty"`
-	MaxRetries *int                `json:"max_retries,omitempty"`
+	SessionID         string              `json:"session_id"`
+	URL               string              `json:"url"`
+	Goal              string              `json:"goal"`
+	Actions           []taskActionRequest `json:"actions,omitempty"`
+	MaxRetries        *int                `json:"max_retries,omitempty"`
+	WaitForCompletion bool                `json:"wait_for_completion,omitempty"`
+	WaitTimeoutMS     int                 `json:"wait_timeout_ms,omitempty"`
 }
 
 type replayTaskRequest struct {
@@ -179,6 +181,15 @@ func (s *Server) createAndQueueTaskNonIdempotent(w http.ResponseWriter, r *http.
 		httpx.WriteJSON(w, status, queued)
 		return
 	}
+
+	if req.WaitForCompletion {
+		timeout := normalizedWaitTimeout(req.WaitTimeoutMS)
+		if completed, done := s.waitForTaskTerminalState(r.Context(), created.ID, timeout); done {
+			httpx.WriteJSON(w, http.StatusOK, completed)
+			return
+		}
+	}
+
 	httpx.WriteJSON(w, http.StatusAccepted, queued)
 }
 
@@ -372,6 +383,45 @@ func (s *Server) listRecentTasks(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"tasks": items,
 	})
+}
+
+func (s *Server) waitForTaskTerminalState(ctx context.Context, taskID string, timeout time.Duration) (task.Task, bool) {
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		found, err := s.tasks.Get(waitCtx, taskID)
+		if err == nil {
+			if found.Status == task.StatusCompleted || found.Status == task.StatusFailed {
+				return found, true
+			}
+		}
+
+		select {
+		case <-waitCtx.Done():
+			return task.Task{}, false
+		case <-ticker.C:
+		}
+	}
+}
+
+func normalizedWaitTimeout(rawMS int) time.Duration {
+	if rawMS <= 0 {
+		return 90 * time.Second
+	}
+	if rawMS < 1000 {
+		rawMS = 1000
+	}
+	if rawMS > 10*60*1000 {
+		rawMS = 10 * 60 * 1000
+	}
+	return time.Duration(rawMS) * time.Millisecond
 }
 
 func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {

@@ -178,6 +178,19 @@ curl -sS -X POST http://localhost:8080/v1/tasks \\
   }'
 ```
 
+Optional synchronous mode (wait for terminal status and return `trace` + artifacts directly):
+```bash
+curl -sS -X POST http://localhost:8080/task \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    "session_id":"sess_000001",
+    "url":"https://duckduckgo.com",
+    "goal":"search for browser use",
+    "wait_for_completion": true,
+    "wait_timeout_ms": 90000
+  }'
+```
+
 7. Poll task status:
 ```bash
 curl -sS http://localhost:8080/v1/tasks/<task-id>
