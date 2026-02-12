@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -197,13 +198,25 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 	}
 	defer r.releaseNode(ctx, nodeLease)
 
-	result, err := r.executor.Execute(ctx, nodeLease.Node.Address, nodeclient.ExecuteInput{
+	execCtx, stopExecution := context.WithCancel(ctx)
+	defer stopExecution()
+	var lostLease atomic.Bool
+	stopKeepalive := r.startLeaseKeepalive(execCtx, nodeLease, func() {
+		lostLease.Store(true)
+		stopExecution()
+	})
+	defer stopKeepalive()
+
+	result, err := r.executor.Execute(execCtx, nodeLease.Node.Address, nodeclient.ExecuteInput{
 		TaskID:  startedTask.ID,
 		URL:     startedTask.URL,
 		Goal:    startedTask.Goal,
 		Actions: mapNodeActions(startedTask.Actions),
 	})
 	if err != nil {
+		if lostLease.Load() {
+			err = errors.New("lease ownership lost during execution")
+		}
 		evidence := failureEvidence{}
 		var execErr *nodeclient.ExecutionError
 		if errors.As(err, &execErr) {
@@ -406,6 +419,7 @@ func isRetriableError(err error) bool {
 		"bad gateway",
 		"eof",
 		"unexpected status 5",
+		"lease ownership lost",
 	}
 	for _, signal := range signals {
 		if strings.Contains(msg, signal) {
@@ -520,6 +534,53 @@ func (r *Runner) releaseNode(ctx context.Context, node leasedNode) {
 		State:  pool.NodeStateReady,
 		At:     time.Now().UTC(),
 	})
+}
+
+func (r *Runner) startLeaseKeepalive(ctx context.Context, node leasedNode, onLost func()) func() {
+	if node.Token == 0 {
+		return func() {}
+	}
+	if onLost == nil {
+		onLost = func() {}
+	}
+	resource := "node:" + strings.TrimSpace(node.Node.ID)
+	interval := r.leaseTTL / 3
+	if interval < 500*time.Millisecond {
+		interval = 500 * time.Millisecond
+	}
+	if interval > 10*time.Second {
+		interval = 10 * time.Second
+	}
+
+	renewCtx, cancel := context.WithCancel(ctx)
+	ticker := time.NewTicker(interval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-renewCtx.Done():
+				return
+			case <-ticker.C:
+				renewed, ok, err := r.leaser.Renew(context.Background(), resource, r.ownerID, node.Token, r.leaseTTL)
+				if err != nil {
+					r.logger.Printf("lease keepalive failed: node_id=%s err=%v", node.Node.ID, err)
+					continue
+				}
+				if !ok {
+					r.logger.Printf("lease keepalive lost ownership: node_id=%s token=%d", node.Node.ID, node.Token)
+					onLost()
+					return
+				}
+				_, _ = r.nodes.Heartbeat(context.Background(), pool.HeartbeatInput{
+					NodeID:      node.Node.ID,
+					State:       pool.NodeStateLeased,
+					At:          time.Now().UTC(),
+					LeasedUntil: renewed.ExpiresAt,
+				})
+			}
+		}
+	}()
+	return cancel
 }
 
 func (r *Runner) failTask(ctx context.Context, taskID, nodeID string, err error) {

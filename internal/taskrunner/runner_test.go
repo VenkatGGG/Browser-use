@@ -150,6 +150,76 @@ func (e *concurrencyTrackingExecutor) MaxConcurrent() int {
 	return e.maxConcurrent
 }
 
+type blockingExecutor struct{}
+
+func (e *blockingExecutor) Execute(ctx context.Context, _ string, _ nodeclient.ExecuteInput) (nodeclient.ExecuteOutput, error) {
+	<-ctx.Done()
+	return nodeclient.ExecuteOutput{}, ctx.Err()
+}
+
+type countingLeaser struct {
+	base lease.Manager
+	mu   sync.Mutex
+	ops  map[string]int
+}
+
+func newCountingLeaser(base lease.Manager) *countingLeaser {
+	return &countingLeaser{
+		base: base,
+		ops:  make(map[string]int),
+	}
+}
+
+func (l *countingLeaser) Acquire(ctx context.Context, resource, owner string, ttl time.Duration) (lease.Lease, bool, error) {
+	leaseValue, ok, err := l.base.Acquire(ctx, resource, owner, ttl)
+	l.mu.Lock()
+	l.ops["acquire"]++
+	l.mu.Unlock()
+	return leaseValue, ok, err
+}
+
+func (l *countingLeaser) Renew(ctx context.Context, resource, owner string, token uint64, ttl time.Duration) (lease.Lease, bool, error) {
+	leaseValue, ok, err := l.base.Renew(ctx, resource, owner, token, ttl)
+	l.mu.Lock()
+	l.ops["renew"]++
+	l.mu.Unlock()
+	return leaseValue, ok, err
+}
+
+func (l *countingLeaser) Release(ctx context.Context, resource, owner string, token uint64) error {
+	l.mu.Lock()
+	l.ops["release"]++
+	l.mu.Unlock()
+	return l.base.Release(ctx, resource, owner, token)
+}
+
+func (l *countingLeaser) count(op string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.ops[op]
+}
+
+type leaseLossLeaser struct {
+	base lease.Manager
+	mu   sync.Mutex
+	hits int
+}
+
+func (l *leaseLossLeaser) Acquire(ctx context.Context, resource, owner string, ttl time.Duration) (lease.Lease, bool, error) {
+	return l.base.Acquire(ctx, resource, owner, ttl)
+}
+
+func (l *leaseLossLeaser) Renew(ctx context.Context, resource, owner string, token uint64, ttl time.Duration) (lease.Lease, bool, error) {
+	l.mu.Lock()
+	l.hits++
+	l.mu.Unlock()
+	return lease.Lease{}, false, nil
+}
+
+func (l *leaseLossLeaser) Release(ctx context.Context, resource, owner string, token uint64) error {
+	return l.base.Release(ctx, resource, owner, token)
+}
+
 func TestRunnerRetriesTransientFailures(t *testing.T) {
 	taskSvc := task.NewInMemoryService()
 	nodes := pool.NewInMemoryRegistry()
@@ -817,6 +887,106 @@ func TestRunnerSharedLeasePreventsConcurrentExecutionOnSingleNode(t *testing.T) 
 
 	if got := exec.MaxConcurrent(); got != 1 {
 		t.Fatalf("expected max executor concurrency 1 with shared lease on single node, got %d", got)
+	}
+}
+
+func TestRunnerRenewsLeaseDuringLongExecution(t *testing.T) {
+	taskSvc := task.NewInMemoryService()
+	nodes := pool.NewInMemoryRegistry()
+	_, err := nodes.Register(context.Background(), pool.RegisterInput{NodeID: "node-1", Address: "node-1:8091", Version: "dev"})
+	if err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+
+	trackingLeaser := newCountingLeaser(lease.NewInMemoryManager())
+	exec := &concurrencyTrackingExecutor{delay: 1700 * time.Millisecond}
+	runner := New(taskSvc, nodes, exec, nil, Config{
+		QueueSize:       8,
+		Workers:         1,
+		NodeWaitTimeout: 1 * time.Second,
+		PollInterval:    30 * time.Millisecond,
+		RetryBaseDelay:  20 * time.Millisecond,
+		RetryMaxDelay:   100 * time.Millisecond,
+		LeaseTTL:        1200 * time.Millisecond,
+		Leaser:          trackingLeaser,
+	}, log.New(io.Discard, "", 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Start(ctx)
+
+	created, err := taskSvc.Create(ctx, task.CreateInput{
+		SessionID:  "sess_1",
+		URL:        "https://example.com",
+		Goal:       "open",
+		MaxRetries: 0,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := runner.Enqueue(ctx, created.ID); err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+
+	completed := waitForTerminalTask(t, ctx, taskSvc, created.ID, 6*time.Second)
+	if completed.Status != task.StatusCompleted {
+		t.Fatalf("expected completed status, got %s error=%s", completed.Status, completed.ErrorMessage)
+	}
+	if trackingLeaser.count("renew") < 1 {
+		t.Fatalf("expected at least one lease renew call, got %d", trackingLeaser.count("renew"))
+	}
+}
+
+func TestRunnerFailsTaskWhenLeaseOwnershipIsLost(t *testing.T) {
+	taskSvc := task.NewInMemoryService()
+	nodes := pool.NewInMemoryRegistry()
+	_, err := nodes.Register(context.Background(), pool.RegisterInput{NodeID: "node-1", Address: "node-1:8091", Version: "dev"})
+	if err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+
+	leaser := &leaseLossLeaser{base: lease.NewInMemoryManager()}
+	runner := New(taskSvc, nodes, &blockingExecutor{}, nil, Config{
+		QueueSize:       8,
+		Workers:         1,
+		NodeWaitTimeout: 1 * time.Second,
+		PollInterval:    30 * time.Millisecond,
+		RetryBaseDelay:  20 * time.Millisecond,
+		RetryMaxDelay:   100 * time.Millisecond,
+		LeaseTTL:        1200 * time.Millisecond,
+		Leaser:          leaser,
+	}, log.New(io.Discard, "", 0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.Start(ctx)
+
+	created, err := taskSvc.Create(ctx, task.CreateInput{
+		SessionID:  "sess_1",
+		URL:        "https://example.com",
+		Goal:       "open",
+		MaxRetries: 0,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := runner.Enqueue(ctx, created.ID); err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+
+	failed := waitForTerminalTask(t, ctx, taskSvc, created.ID, 6*time.Second)
+	if failed.Status != task.StatusFailed {
+		t.Fatalf("expected failed status, got %s", failed.Status)
+	}
+	if !strings.Contains(strings.ToLower(failed.ErrorMessage), "lease ownership lost") {
+		t.Fatalf("expected lease ownership lost error, got %q", failed.ErrorMessage)
+	}
+}
+
+func TestIsRetriableErrorLeaseOwnershipLost(t *testing.T) {
+	t.Parallel()
+	if !isRetriableError(errors.New("lease ownership lost during execution")) {
+		t.Fatalf("expected lease ownership lost to be retriable")
 	}
 }
 

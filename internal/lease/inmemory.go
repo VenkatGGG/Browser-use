@@ -85,3 +85,44 @@ func (m *InMemoryManager) Release(_ context.Context, resource, owner string, tok
 	delete(m.entries, resource)
 	return nil
 }
+
+func (m *InMemoryManager) Renew(_ context.Context, resource, owner string, token uint64, ttl time.Duration) (Lease, bool, error) {
+	resource = strings.TrimSpace(resource)
+	owner = strings.TrimSpace(owner)
+	if resource == "" {
+		return Lease{}, false, errors.New("resource is required")
+	}
+	if owner == "" {
+		return Lease{}, false, errors.New("owner is required")
+	}
+	if token == 0 {
+		return Lease{}, false, errors.New("token is required")
+	}
+	if ttl <= 0 {
+		ttl = 90 * time.Second
+	}
+
+	now := time.Now().UTC()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	existing, ok := m.entries[resource]
+	if !ok {
+		return Lease{}, false, nil
+	}
+	if now.After(existing.expiresAt) {
+		delete(m.entries, resource)
+		return Lease{}, false, nil
+	}
+	if existing.owner != owner || existing.token != token {
+		return Lease{}, false, nil
+	}
+
+	next := now.Add(ttl)
+	existing.expiresAt = next
+	m.entries[resource] = existing
+	return Lease{
+		Token:     token,
+		ExpiresAt: next,
+	}, true, nil
+}

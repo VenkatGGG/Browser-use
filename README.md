@@ -62,6 +62,7 @@ Local-first orchestration infrastructure for AI browser automation.
 - Runner now supports distributed node leasing with fencing tokens:
   - `internal/lease` package (in-memory + Redis implementations)
   - lease TTL via `ORCHESTRATOR_NODE_LEASE_TTL`
+  - active lease keepalive/renewal during task execution to prevent lease expiry on long-running tasks
   - lease state is reflected in node registry (`leased_until`)
 - API idempotency support added for creates:
   - `POST /v1/sessions` and `POST /v1/tasks`

@@ -67,3 +67,37 @@ func TestInMemoryManagerLeaseExpires(t *testing.T) {
 		t.Fatalf("expected acquire after expiry to succeed")
 	}
 }
+
+func TestInMemoryManagerRenewExtendsActiveLease(t *testing.T) {
+	manager := NewInMemoryManager()
+	ctx := context.Background()
+
+	lease1, ok, err := manager.Acquire(ctx, "node:3", "runner-1", 80*time.Millisecond)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected acquire to succeed")
+	}
+
+	time.Sleep(40 * time.Millisecond)
+	renewed, ok, err := manager.Renew(ctx, "node:3", "runner-1", lease1.Token, 120*time.Millisecond)
+	if err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected renew to succeed")
+	}
+	if !renewed.ExpiresAt.After(lease1.ExpiresAt) {
+		t.Fatalf("expected renewed lease expiry to extend beyond original expiry")
+	}
+
+	time.Sleep(90 * time.Millisecond)
+	_, ok, err = manager.Acquire(ctx, "node:3", "runner-2", 40*time.Millisecond)
+	if err != nil {
+		t.Fatalf("acquire while renewed lease active: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected resource to remain leased after renew")
+	}
+}
