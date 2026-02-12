@@ -57,6 +57,19 @@ Local-first orchestration infrastructure for AI browser automation.
   - `ORCHESTRATOR_POOL_TARGET_READY=<N>`
   - provider/manager config from `ORCHESTRATOR_POOL_*` env vars
 
+### Phase 4 started (lease safety + idempotency)
+- Runner now supports distributed node leasing with fencing tokens:
+  - `internal/lease` package (in-memory + Redis implementations)
+  - lease TTL via `ORCHESTRATOR_NODE_LEASE_TTL`
+  - lease state is reflected in node registry (`leased_until`)
+- API idempotency support added for creates:
+  - `POST /v1/sessions` and `POST /v1/tasks`
+  - send `Idempotency-Key` header to get safe retries without duplicate resources
+  - `internal/idempotency` package (in-memory + Redis implementations)
+  - retention and lock TTL via:
+    - `ORCHESTRATOR_IDEMPOTENCY_TTL`
+    - `ORCHESTRATOR_IDEMPOTENCY_LOCK_TTL`
+
 ### Phase 5 started (brain execution baseline)
 - Orchestrator now enqueues task requests and executes them asynchronously in background workers.
 - `node-agent` exposes `POST /v1/execute` and runs CDP actions:
@@ -122,6 +135,14 @@ curl -sS -X POST http://localhost:8080/v1/sessions \\
 curl -sS -X POST http://localhost:8080/v1/tasks \\
   -H 'Content-Type: application/json' \\
   -d '{"session_id":"sess_000001","url":"https://example.com","goal":"open page and capture screenshot","max_retries":2}'
+```
+
+Optional (safe retries): add idempotency key for create operations:
+```bash
+curl -sS -X POST http://localhost:8080/v1/tasks \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: task-demo-001' \
+  -d '{"session_id":"sess_000001","url":"https://example.com","goal":"open page and capture screenshot"}'
 ```
 
 6. Execute a deterministic action flow:
@@ -197,6 +218,7 @@ make run-orchestrator
 - Supported deterministic action types include `wait_for`, `click`, `type`, `wait`, `press_enter`, and `wait_for_url_contains`.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
 - `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.
+- `Idempotency-Key` header is supported on `POST /v1/sessions` and `POST /v1/tasks`.
 - Node-agent now detects blocker pages (captcha/human verification/form validation), returns structured blocker metadata, and runner persists blocker evidence on failed tasks without retry loops.
 - Runner applies per-domain cooldowns after challenge blockers (`human_verification_required` / `bot_blocked`) to fail subsequent tasks fast until cooldown expires.
 - Warm-pool manager is currently feature-flagged and intended for host-run orchestrator mode (`make run-orchestrator`) where `docker` CLI is available; compose mode keeps static node service by default.
