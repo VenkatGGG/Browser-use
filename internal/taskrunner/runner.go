@@ -349,10 +349,14 @@ func isRetriableError(err error) bool {
 		"confirm this search was made by a human",
 		"please fill out this field",
 		"timeout waiting for url to contain",
+		"timeout waiting for selector",
 		"unsupported action type",
 		"selector is required",
 		"url is required",
 		"invalid selector syntax",
+		"click failed: not_found",
+		"type failed: not_found",
+		"press_enter failed: not_found",
 	}
 	for _, signal := range nonRetriableSignals {
 		if strings.Contains(msg, signal) {
@@ -538,6 +542,7 @@ func mapNodeActions(actions []task.Action) []nodeclient.Action {
 			Type:      action.Type,
 			Selector:  action.Selector,
 			Text:      action.Text,
+			Pixels:    action.Pixels,
 			TimeoutMS: action.TimeoutMS,
 			DelayMS:   action.DelayMS,
 		})

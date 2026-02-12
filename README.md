@@ -216,6 +216,7 @@ make run-orchestrator
 - Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
 - Supported deterministic action types include `wait_for`, `click`, `type`, `wait`, `press_enter`, and `wait_for_url_contains`.
+- Supported deterministic action types include `wait_for`, `click`, `type`, `scroll`, `wait`, `press_enter`, and `wait_for_url_contains`.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
 - `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.
 - `Idempotency-Key` header is supported on `POST /v1/sessions` and `POST /v1/tasks`.
