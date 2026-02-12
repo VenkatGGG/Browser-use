@@ -451,3 +451,39 @@ func TestIsExtractedValueValid(t *testing.T) {
 		t.Fatalf("expected invalid rating extraction")
 	}
 }
+
+func TestSanitizePlannedActionsDropsNoOpAndDuplicateSteps(t *testing.T) {
+	t.Parallel()
+
+	input := []executeAction{
+		{Type: "type", Selector: "input[name='q']", Text: ""},
+		{Type: "type", Selector: "input[name='q']", Text: "browser use"},
+		{Type: "type", Selector: "input[name='q']", Text: "browser use"},
+		{Type: "click", Selector: "button[type='submit']"},
+	}
+	got := sanitizePlannedActions(input)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 sanitized actions, got %d (%+v)", len(got), got)
+	}
+	if got[0].Type != "type" || got[0].Text != "browser use" {
+		t.Fatalf("unexpected first action: %+v", got[0])
+	}
+	if got[1].Type != "click" {
+		t.Fatalf("unexpected second action: %+v", got[1])
+	}
+}
+
+func TestSanitizePlannedActionsNormalizesScrollDirection(t *testing.T) {
+	t.Parallel()
+
+	input := []executeAction{
+		{Type: "scroll", Text: "left", Pixels: 600},
+	}
+	got := sanitizePlannedActions(input)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 sanitized scroll action, got %d", len(got))
+	}
+	if got[0].Text != "down" {
+		t.Fatalf("expected normalized scroll direction down, got %q", got[0].Text)
+	}
+}

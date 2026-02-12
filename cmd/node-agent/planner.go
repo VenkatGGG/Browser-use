@@ -736,6 +736,7 @@ func sanitizePlannedActions(actions []executeAction) []executeAction {
 	}
 
 	cleaned := make([]executeAction, 0, len(actions))
+	seen := make(map[string]struct{}, len(actions))
 	for _, action := range actions {
 		typ := strings.ToLower(strings.TrimSpace(action.Type))
 		if _, ok := allowed[typ]; !ok {
@@ -775,15 +776,34 @@ func sanitizePlannedActions(actions []executeAction) []executeAction {
 			if normalized.Selector == "" {
 				continue
 			}
+			if typ == "type" && normalized.Text == "" {
+				continue
+			}
 		case "wait_for_url_contains":
-			if normalized.Text == "" {
+			if len(normalized.Text) < 2 {
 				continue
 			}
 		case "scroll":
-			if normalized.Text == "" {
+			direction := strings.ToLower(strings.TrimSpace(normalized.Text))
+			if direction != "up" && direction != "down" {
 				normalized.Text = "down"
+			} else {
+				normalized.Text = direction
 			}
 		}
+
+		signature := strings.Join([]string{
+			normalized.Type,
+			normalized.Selector,
+			normalized.Text,
+			fmt.Sprintf("%d", normalized.TimeoutMS),
+			fmt.Sprintf("%d", normalized.DelayMS),
+			fmt.Sprintf("%d", normalized.Pixels),
+		}, "|")
+		if _, duplicate := seen[signature]; duplicate {
+			continue
+		}
+		seen[signature] = struct{}{}
 
 		cleaned = append(cleaned, normalized)
 		if len(cleaned) >= 12 {
