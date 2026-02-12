@@ -20,6 +20,8 @@ type Server struct {
 	sessions          session.Service
 	tasks             task.Service
 	nodes             pool.Registry
+	nodeStateStore    NodeStateStore
+	nodeRecycler      NodeRecycler
 	dispatcher        TaskDispatcher
 	defaultMaxRetries int
 	artifactPath      string
@@ -29,14 +31,27 @@ type Server struct {
 	idempotencyLock   time.Duration
 }
 
+type NodeStateStore interface {
+	SetState(ctx context.Context, nodeID string, state pool.NodeState, at time.Time) (pool.Node, error)
+}
+
+type NodeRecycler interface {
+	DestroyNode(ctx context.Context, nodeID string) error
+}
+
 func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry, dispatcher TaskDispatcher, defaultMaxRetries int, artifactPath string, artifactHandler http.Handler) *Server {
 	if defaultMaxRetries < 0 {
 		defaultMaxRetries = 0
+	}
+	var stateStore NodeStateStore
+	if cast, ok := nodes.(NodeStateStore); ok {
+		stateStore = cast
 	}
 	return &Server{
 		sessions:          sessions,
 		tasks:             tasks,
 		nodes:             nodes,
+		nodeStateStore:    stateStore,
 		dispatcher:        dispatcher,
 		defaultMaxRetries: defaultMaxRetries,
 		artifactPath:      artifactPath,
@@ -44,6 +59,12 @@ func NewServer(sessions session.Service, tasks task.Service, nodes pool.Registry
 		idempotency:       idempotency.NewInMemoryStore(),
 		idempotencyTTL:    24 * time.Hour,
 		idempotencyLock:   30 * time.Second,
+	}
+}
+
+func (s *Server) SetNodeRecycler(recycler NodeRecycler) {
+	if recycler != nil {
+		s.nodeRecycler = recycler
 	}
 }
 

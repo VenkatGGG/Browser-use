@@ -105,15 +105,59 @@ func (r *InMemoryRegistry) Heartbeat(_ context.Context, input HeartbeatInput) (N
 		return Node{}, ErrNodeNotFound
 	}
 
+	if existing.State == NodeStateDraining && state == NodeStateReady {
+		state = NodeStateDraining
+	}
+	if existing.State == NodeStateDead && state == NodeStateReady {
+		state = NodeStateDead
+	}
+
 	existing.State = state
 	existing.LastHeartbeat = at
-	if state == NodeStateLeased && !input.LeasedUntil.IsZero() {
-		existing.LeasedUntil = input.LeasedUntil.UTC()
-	} else if state != NodeStateLeased {
+	if state == NodeStateLeased {
+		if !input.LeasedUntil.IsZero() {
+			existing.LeasedUntil = input.LeasedUntil.UTC()
+		}
+	} else {
 		existing.LeasedUntil = time.Time{}
 	}
 	existing.UpdatedAt = at
 	r.nodes[nodeID] = existing
+
+	return existing, nil
+}
+
+func (r *InMemoryRegistry) SetState(_ context.Context, nodeID string, state NodeState, at time.Time) (Node, error) {
+	trimmedNodeID := strings.TrimSpace(nodeID)
+	if trimmedNodeID == "" {
+		return Node{}, errors.New("node_id is required")
+	}
+
+	nextState := state
+	if nextState == "" {
+		nextState = NodeStateReady
+	}
+
+	nextAt := at.UTC()
+	if nextAt.IsZero() {
+		nextAt = time.Now().UTC()
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	existing, ok := r.nodes[trimmedNodeID]
+	if !ok {
+		return Node{}, ErrNodeNotFound
+	}
+
+	existing.State = nextState
+	existing.LastHeartbeat = nextAt
+	if nextState != NodeStateLeased {
+		existing.LeasedUntil = time.Time{}
+	}
+	existing.UpdatedAt = nextAt
+	r.nodes[trimmedNodeID] = existing
 
 	return existing, nil
 }

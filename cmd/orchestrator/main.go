@@ -51,6 +51,7 @@ func main() {
 	leaseManager := lease.Manager(lease.NewInMemoryManager())
 	idemStore := idempotency.Store(idempotency.NewInMemoryStore())
 	var redisClient *redis.Client
+	var nodeRecycler api.NodeRecycler
 
 	if cfg.RedisAddr != "" {
 		redisClient = redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
@@ -98,6 +99,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("initialize pool provider: %v", err)
 		}
+		nodeRecycler = provider
 
 		poolManager := pool.NewManager(nodeRegistry, provider, pool.ManagerConfig{
 			TargetReady:       cfg.PoolTargetReady,
@@ -148,6 +150,7 @@ func main() {
 		artifactHandler,
 	)
 	server.SetIdempotencyStore(idemStore, cfg.IdempotencyTTL, cfg.IdempotencyLockTTL)
+	server.SetNodeRecycler(nodeRecycler)
 
 	httpServer := &http.Server{
 		Addr:         cfg.HTTPAddr,

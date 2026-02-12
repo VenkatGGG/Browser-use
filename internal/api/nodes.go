@@ -73,17 +73,27 @@ func (s *Server) handleNodeByID(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.TrimPrefix(r.URL.Path, "/v1/nodes/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "invalid_node_path", "expected /v1/nodes/{id}/heartbeat")
+		httpx.WriteError(w, http.StatusBadRequest, "invalid_node_path", "expected /v1/nodes/{id}/{heartbeat|drain|activate|recycle}")
 		return
 	}
 
 	nodeID := strings.TrimSpace(parts[0])
 	action := strings.TrimSpace(parts[1])
-	if action != "heartbeat" {
+	switch action {
+	case "heartbeat":
+		s.handleNodeHeartbeat(w, r, nodeID)
+	case "drain":
+		s.handleNodeSetState(w, r, nodeID, pool.NodeStateDraining)
+	case "activate":
+		s.handleNodeSetState(w, r, nodeID, pool.NodeStateReady)
+	case "recycle":
+		s.handleNodeRecycle(w, r, nodeID)
+	default:
 		httpx.WriteError(w, http.StatusNotFound, "not_found", "route not found")
-		return
 	}
+}
 
+func (s *Server) handleNodeHeartbeat(w http.ResponseWriter, r *http.Request, nodeID string) {
 	if r.Method != http.MethodPost {
 		httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
@@ -120,6 +130,64 @@ func (s *Server) handleNodeByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	httpx.WriteJSON(w, http.StatusOK, node)
+}
+
+func (s *Server) handleNodeSetState(w http.ResponseWriter, r *http.Request, nodeID string, state pool.NodeState) {
+	if r.Method != http.MethodPost {
+		httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if s.nodeStateStore == nil {
+		httpx.WriteError(w, http.StatusNotImplemented, "unsupported_operation", "node state updates are not supported by this registry")
+		return
+	}
+
+	node, err := s.nodeStateStore.SetState(r.Context(), nodeID, state, time.Now().UTC())
+	if err != nil {
+		if errors.Is(err, pool.ErrNodeNotFound) {
+			httpx.WriteError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		httpx.WriteError(w, http.StatusBadRequest, "set_state_failed", err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, node)
+}
+
+func (s *Server) handleNodeRecycle(w http.ResponseWriter, r *http.Request, nodeID string) {
+	if r.Method != http.MethodPost {
+		httpx.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if s.nodeStateStore == nil {
+		httpx.WriteError(w, http.StatusNotImplemented, "unsupported_operation", "node state updates are not supported by this registry")
+		return
+	}
+	if s.nodeRecycler == nil {
+		httpx.WriteError(w, http.StatusNotImplemented, "unsupported_operation", "node recycle is not supported in this mode")
+		return
+	}
+
+	now := time.Now().UTC()
+	if _, err := s.nodeStateStore.SetState(r.Context(), nodeID, pool.NodeStateDraining, now); err != nil && !errors.Is(err, pool.ErrNodeNotFound) {
+		httpx.WriteError(w, http.StatusBadRequest, "set_state_failed", err.Error())
+		return
+	}
+	if err := s.nodeRecycler.DestroyNode(r.Context(), nodeID); err != nil {
+		httpx.WriteError(w, http.StatusBadGateway, "destroy_failed", err.Error())
+		return
+	}
+
+	node, err := s.nodeStateStore.SetState(r.Context(), nodeID, pool.NodeStateDead, time.Now().UTC())
+	if err != nil {
+		if errors.Is(err, pool.ErrNodeNotFound) {
+			httpx.WriteError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		httpx.WriteError(w, http.StatusBadRequest, "set_state_failed", err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, node)
 }
 
