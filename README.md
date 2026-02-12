@@ -156,6 +156,7 @@ Local-first orchestration infrastructure for AI browser automation.
   - Redux handles local UI state (filters/selection/polling settings)
   - TanStack Query handles server state (polling/caching/mutations for tasks/nodes/stats)
   - backend API routes remain unchanged (`/v1/*`)
+  - `/dashboard` now serves `web/dist/index.html` when a built frontend is available (or when `ORCHESTRATOR_DASHBOARD_DIST` is set); embedded dashboard remains fallback
 
 ## Quick start
 
@@ -326,3 +327,4 @@ make ui-build        # build separated TypeScript dashboard
 - Runner applies per-domain cooldowns after challenge blockers (`human_verification_required` / `bot_blocked`) to fail subsequent tasks fast until cooldown expires.
 - Task create and replay flows now validate provided `session_id` values against the session store and reject unknown sessions.
 - Warm-pool manager is currently feature-flagged and intended for host-run orchestrator mode (`make run-orchestrator`) where `docker` CLI is available; compose mode keeps static node service by default.
+- Optional dashboard dist override: set `ORCHESTRATOR_DASHBOARD_DIST=/absolute/path/to/web/dist` to force serving a specific built frontend bundle.

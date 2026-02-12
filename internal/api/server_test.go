@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -171,6 +173,8 @@ func TestNodeDrainActivateAndRecycle(t *testing.T) {
 }
 
 func TestDashboardRoute(t *testing.T) {
+	t.Setenv("ORCHESTRATOR_DASHBOARD_DIST", filepath.Join(t.TempDir(), "missing-dist"))
+
 	srv := NewServer(
 		session.NewInMemoryService(),
 		task.NewInMemoryService(),
@@ -193,6 +197,51 @@ func TestDashboardRoute(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "Browser Use Control Room") {
 		t.Fatalf("dashboard response missing expected title")
+	}
+}
+
+func TestDashboardServesBuiltDistWhenConfigured(t *testing.T) {
+	distDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(distDir, "index.html"), []byte("<!doctype html><title>TS Dashboard</title>"), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+	assetsDir := filepath.Join(distDir, "assets")
+	if err := os.MkdirAll(assetsDir, 0o755); err != nil {
+		t.Fatalf("mkdir assets: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(assetsDir, "app.js"), []byte("console.log('ok');"), 0o644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+	t.Setenv("ORCHESTRATOR_DASHBOARD_DIST", distDir)
+
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		nil,
+		1,
+		"",
+		nil,
+	)
+
+	indexReq := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	indexRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(indexRR, indexReq)
+	if indexRR.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for dist index, got %d", indexRR.Code)
+	}
+	if !strings.Contains(indexRR.Body.String(), "TS Dashboard") {
+		t.Fatalf("expected configured dist index response, got body=%s", indexRR.Body.String())
+	}
+
+	assetReq := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	assetRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(assetRR, assetReq)
+	if assetRR.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for dist asset, got %d body=%s", assetRR.Code, assetRR.Body.String())
+	}
+	if !strings.Contains(assetRR.Body.String(), "console.log") {
+		t.Fatalf("expected dist asset content, got body=%s", assetRR.Body.String())
 	}
 }
 
