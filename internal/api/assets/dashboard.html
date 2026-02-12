@@ -411,6 +411,7 @@
     .pill-running { background: #d7ebff; color: #225f88; }
     .pill-completed { background: #dff5e8; color: #1d7a4d; }
     .pill-failed { background: #f9dfd8; color: #9a3219; }
+    .pill-canceled { background: #eceff3; color: #4f5f69; }
     .pill-blocker { background: #fde9d7; color: #a14f1c; }
 
     .tasks-grid {
@@ -466,6 +467,29 @@
 
     tr.active td {
       background: #e6f5f2;
+    }
+
+    .table-actions {
+      display: inline-flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .btn-inline {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: #243339;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .btn-inline-danger {
+      background: #fff3ef;
+      border-color: #efc9bc;
+      color: #99391e;
     }
 
     .detail {
@@ -906,6 +930,7 @@
                 <option value="running">running</option>
                 <option value="completed">completed</option>
                 <option value="failed">failed</option>
+                <option value="canceled">canceled</option>
               </select>
             </div>
             <div class="stack">
@@ -960,6 +985,7 @@
                     <th>Duration</th>
                     <th>Blocker</th>
                     <th>Artifact</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody id="tasks-body"></tbody>
@@ -1105,6 +1131,7 @@
       if (normalized === "running") return "pill-running";
       if (normalized === "completed") return "pill-completed";
       if (normalized === "failed") return "pill-failed";
+      if (normalized === "canceled") return "pill-canceled";
       return "pill-warming";
     }
 
@@ -1417,6 +1444,12 @@
         const blocker = task.blocker_type
           ? '<span class="pill pill-blocker" title="' + escapeHTML(task.blocker_message || task.blocker_type) + '">' + escapeHTML(compactText(task.blocker_type, 20)) + '</span>'
           : '-';
+        const quickActions = [
+          '<button type="button" class="btn-inline" data-task-quick-action="replay" data-task-id="' + escapeHTML(task.id || '') + '">Replay</button>'
+        ];
+        if (isTaskCancelable(task)) {
+          quickActions.push('<button type="button" class="btn-inline btn-inline-danger" data-task-quick-action="cancel" data-task-id="' + escapeHTML(task.id || '') + '">Cancel</button>');
+        }
 
         return (
           '<tr data-task-id="' + escapeHTML(task.id) + '"' + rowClass + '>' +
@@ -1430,6 +1463,7 @@
             '<td class="mono">' + escapeHTML(durationForTask(task)) + '</td>' +
             '<td>' + blocker + '</td>' +
             '<td>' + artifact + '</td>' +
+            '<td><div class="table-actions">' + quickActions.join('') + '</div></td>' +
           '</tr>'
         );
       }).join('');
@@ -1953,6 +1987,28 @@
           }
           void runNodeAction(nodeID, action, nodeActionTarget);
           return;
+        }
+
+        const quickTaskActionTarget = event.target.closest('[data-task-quick-action][data-task-id]');
+        if (quickTaskActionTarget) {
+          event.preventDefault();
+          event.stopPropagation();
+          const taskID = quickTaskActionTarget.getAttribute('data-task-id');
+          const action = quickTaskActionTarget.getAttribute('data-task-quick-action');
+          if (!taskID || !action) return;
+          const task = state.tasks.find((item) => item.id === taskID);
+          if (!task) {
+            createStatusEl.textContent = 'Task ' + taskID + ' is not in current fetch window.';
+            return;
+          }
+          if (action === 'replay') {
+            void replayTask(task, { freshSession: false });
+            return;
+          }
+          if (action === 'cancel') {
+            void cancelTask(task, quickTaskActionTarget);
+            return;
+          }
         }
 
         const artifactTarget = event.target.closest('[data-artifact]');
