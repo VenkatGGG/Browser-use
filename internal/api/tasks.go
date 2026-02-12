@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -27,6 +28,7 @@ type taskActionRequest struct {
 
 type createTaskRequest struct {
 	SessionID         string              `json:"session_id"`
+	TenantID          string              `json:"tenant_id,omitempty"`
 	URL               string              `json:"url"`
 	Goal              string              `json:"goal"`
 	Actions           []taskActionRequest `json:"actions,omitempty"`
@@ -164,8 +166,15 @@ func (s *Server) createAndQueueTaskNonIdempotent(w http.ResponseWriter, r *http.
 	if req.MaxRetries != nil {
 		maxRetries = *req.MaxRetries
 	}
+
+	sessionID, err := s.resolveTaskSessionID(r.Context(), strings.TrimSpace(req.SessionID), strings.TrimSpace(req.TenantID))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "create_failed", err.Error())
+		return
+	}
+
 	created, err := s.tasks.Create(r.Context(), task.CreateInput{
-		SessionID:  strings.TrimSpace(req.SessionID),
+		SessionID:  sessionID,
 		URL:        strings.TrimSpace(req.URL),
 		Goal:       strings.TrimSpace(req.Goal),
 		Actions:    actions,
@@ -191,6 +200,27 @@ func (s *Server) createAndQueueTaskNonIdempotent(w http.ResponseWriter, r *http.
 	}
 
 	httpx.WriteJSON(w, http.StatusAccepted, queued)
+}
+
+func (s *Server) resolveTaskSessionID(ctx context.Context, sessionID, tenantID string) (string, error) {
+	id := strings.TrimSpace(sessionID)
+	if id != "" {
+		return id, nil
+	}
+	if s.sessions == nil {
+		return "", errors.New("session_id is required")
+	}
+
+	tenant := strings.TrimSpace(tenantID)
+	if tenant == "" {
+		tenant = "task"
+	}
+
+	created, err := s.sessions.Create(ctx, session.CreateInput{TenantID: tenant})
+	if err != nil {
+		return "", fmt.Errorf("failed to create session: %w", err)
+	}
+	return created.ID, nil
 }
 
 func (s *Server) replayTask(w http.ResponseWriter, r *http.Request, sourceTaskID string) {

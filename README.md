@@ -154,6 +154,13 @@ curl -sS -X POST http://localhost:8080/v1/tasks \\
   -d '{"session_id":"sess_000001","url":"https://example.com","goal":"open page and capture screenshot","max_retries":2}'
 ```
 
+5b. Execute a one-shot task without pre-creating a session (`session_id` auto-created):
+```bash
+curl -sS -X POST http://localhost:8080/task \\
+  -H 'Content-Type: application/json' \\
+  -d '{"url":"https://example.com","goal":"open page and capture screenshot","wait_for_completion":true}'
+```
+
 Optional (safe retries): add idempotency key for create operations:
 ```bash
 curl -sS -X POST http://localhost:8080/v1/tasks \

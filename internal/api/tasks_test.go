@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,6 +133,63 @@ func TestCreateTaskLegacyAliasQueued(t *testing.T) {
 	}
 	if dispatcher.lastTaskID != created.ID {
 		t.Fatalf("expected dispatched task id %s, got %s", created.ID, dispatcher.lastTaskID)
+	}
+}
+
+func TestCreateTaskAutoCreatesSessionWhenMissing(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	body := []byte(`{"url":"https://example.com","goal":"open"}`)
+	req := httptest.NewRequest(http.MethodPost, "/task", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var created task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode task response: %v", err)
+	}
+	if !strings.HasPrefix(created.SessionID, "sess_") {
+		t.Fatalf("expected auto-created session id, got %q", created.SessionID)
+	}
+}
+
+func TestCreateTaskMissingSessionFailsWhenSessionServiceUnavailable(t *testing.T) {
+	dispatcher := &recordingDispatcher{}
+	srv := NewServer(
+		nil,
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		dispatcher,
+		1,
+		"",
+		nil,
+	)
+
+	body := []byte(`{"url":"https://example.com","goal":"open"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when session service unavailable, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "session_id is required") == false {
+		t.Fatalf("expected session_id error, got body=%s", rr.Body.String())
 	}
 }
 
