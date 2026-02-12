@@ -38,7 +38,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	sessionSvc := session.NewInMemoryService()
+	sessionServiceInitCtx, sessionServiceInitCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	sessionSvc, err := session.NewPostgresService(sessionServiceInitCtx, cfg.PostgresDSN)
+	sessionServiceInitCancel()
+	if err != nil {
+		log.Fatalf("initialize session service: %v", err)
+	}
+	defer sessionSvc.Close()
 	taskServiceInitCtx, taskServiceInitCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	taskSvc, err := task.NewPostgresService(taskServiceInitCtx, cfg.PostgresDSN)
 	taskServiceInitCancel()
@@ -151,6 +157,7 @@ func main() {
 	)
 	server.SetIdempotencyStore(idemStore, cfg.IdempotencyTTL, cfg.IdempotencyLockTTL)
 	server.SetNodeRecycler(nodeRecycler)
+	server.SetAPISecurity(cfg.APIKey, cfg.RateLimitPerMinute)
 
 	httpServer := &http.Server{
 		Addr:         cfg.HTTPAddr,

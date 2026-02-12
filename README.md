@@ -286,7 +286,7 @@ make soak-local      # enqueue/poll many tasks and print reliability summary
 ```
 
 ## Notes
-- Sessions are still in-memory; task state is persisted in Postgres.
+- Sessions and task state are persisted in Postgres.
 - Queued tasks are reconciled from Postgres on runner startup/restart.
 - Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
@@ -297,6 +297,11 @@ make soak-local      # enqueue/poll many tasks and print reliability summary
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
 - `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.
 - `Idempotency-Key` header is supported on `POST /v1/sessions` and `POST /v1/tasks`.
+- Optional API safety controls:
+  - `ORCHESTRATOR_API_KEY=<secret>` enforces API key auth on create/replay routes (`POST /sessions`, `POST /v1/sessions`, `POST /task`, `POST /v1/tasks`, `POST /v1/tasks/{id}/replay`).
+  - Send key via `X-API-Key` (or `Authorization: Bearer <secret>`).
+  - `ORCHESTRATOR_RATE_LIMIT_PER_MINUTE=<N>` enables per-client fixed-window rate limiting on those same write routes.
 - Node-agent now detects blocker pages (captcha/human verification/form validation), returns structured blocker metadata, and runner persists blocker evidence on failed tasks without retry loops.
+- Node-agent now performs a short blocker re-check for likely transient anti-bot interstitials (for example Cloudflare "checking your browser") before classifying a task as blocked.
 - Runner applies per-domain cooldowns after challenge blockers (`human_verification_required` / `bot_blocked`) to fail subsequent tasks fast until cooldown expires.
 - Warm-pool manager is currently feature-flagged and intended for host-run orchestrator mode (`make run-orchestrator`) where `docker` CLI is available; compose mode keeps static node service by default.

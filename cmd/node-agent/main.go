@@ -285,18 +285,7 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 }
 
 func (e *browserExecutor) detectBlocker(ctx context.Context, client *cdp.Client) (bool, executeResponse) {
-	title, err := client.EvaluateString(ctx, "document.title")
-	if err != nil {
-		return false, executeResponse{}
-	}
-	finalURL, err := client.EvaluateString(ctx, "window.location.href")
-	if err != nil {
-		return false, executeResponse{}
-	}
-	bodyText, err := client.EvaluateString(ctx, `(() => {
-		const raw = document && document.body ? String(document.body.innerText || document.body.textContent || "") : "";
-		return raw.replace(/\s+/g, " ").slice(0, 5000);
-	})()`)
+	title, finalURL, bodyText, err := collectBlockerSignals(ctx, client)
 	if err != nil {
 		return false, executeResponse{}
 	}
@@ -304,6 +293,27 @@ func (e *browserExecutor) detectBlocker(ctx context.Context, client *cdp.Client)
 	blockerType, blockerMessage := classifyBlocker(finalURL, title, bodyText)
 	if blockerType == "" {
 		return false, executeResponse{}
+	}
+	if blockerType == "human_verification_required" && isLikelyTransientChallenge(finalURL, title, bodyText) {
+		recheckDelay := minDuration(3*time.Second, e.renderDelay)
+		if recheckDelay <= 0 {
+			recheckDelay = 2 * time.Second
+		}
+		select {
+		case <-ctx.Done():
+			return false, executeResponse{}
+		case <-time.After(recheckDelay):
+		}
+		reTitle, reURL, reBody, reErr := collectBlockerSignals(ctx, client)
+		if reErr == nil {
+			title = reTitle
+			finalURL = reURL
+			bodyText = reBody
+			blockerType, blockerMessage = classifyBlocker(finalURL, title, bodyText)
+			if blockerType == "" {
+				return false, executeResponse{}
+			}
+		}
 	}
 
 	screenshot := ""
@@ -321,6 +331,25 @@ func (e *browserExecutor) detectBlocker(ctx context.Context, client *cdp.Client)
 		BlockerType:      blockerType,
 		BlockerMessage:   blockerMessage,
 	}
+}
+
+func collectBlockerSignals(ctx context.Context, client *cdp.Client) (string, string, string, error) {
+	title, err := client.EvaluateString(ctx, "document.title")
+	if err != nil {
+		return "", "", "", err
+	}
+	finalURL, err := client.EvaluateString(ctx, "window.location.href")
+	if err != nil {
+		return "", "", "", err
+	}
+	bodyText, err := client.EvaluateString(ctx, `(() => {
+		const raw = document && document.body ? String(document.body.innerText || document.body.textContent || "") : "";
+		return raw.replace(/\s+/g, " ").slice(0, 5000);
+	})()`)
+	if err != nil {
+		return "", "", "", err
+	}
+	return title, finalURL, bodyText, nil
 }
 
 func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, action executeAction) (string, error) {

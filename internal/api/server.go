@@ -22,6 +22,8 @@ type Server struct {
 	nodes             pool.Registry
 	nodeStateStore    NodeStateStore
 	nodeRecycler      NodeRecycler
+	requiredAPIKey    string
+	rateLimiter       *fixedWindowLimiter
 	dispatcher        TaskDispatcher
 	defaultMaxRetries int
 	artifactPath      string
@@ -80,6 +82,15 @@ func (s *Server) SetIdempotencyStore(store idempotency.Store, ttl, lockTTL time.
 	}
 }
 
+func (s *Server) SetAPISecurity(apiKey string, rateLimitPerMinute int) {
+	s.requiredAPIKey = apiKey
+	if rateLimitPerMinute > 0 {
+		s.rateLimiter = newFixedWindowLimiter(rateLimitPerMinute, time.Minute)
+	} else {
+		s.rateLimiter = nil
+	}
+}
+
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
@@ -110,7 +121,7 @@ func (s *Server) Routes() http.Handler {
 		mux.Handle(path, s.artifactHandler)
 	}
 
-	return mux
+	return s.withAPISecurity(mux)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

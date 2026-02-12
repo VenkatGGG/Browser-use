@@ -34,6 +34,13 @@ func TestClassifyBlocker(t *testing.T) {
 			want:  "bot_blocked",
 		},
 		{
+			name:  "cloudflare block code",
+			url:   "https://example.com/protected",
+			title: "Attention Required! | Cloudflare",
+			body:  "Error 1020: Access denied",
+			want:  "bot_blocked",
+		},
+		{
 			name:  "normal page",
 			url:   "https://example.com",
 			title: "Example Domain",
@@ -51,5 +58,25 @@ func TestClassifyBlocker(t *testing.T) {
 				t.Fatalf("classifyBlocker()=%q want=%q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestIsLikelyTransientChallenge(t *testing.T) {
+	t.Parallel()
+
+	if !isLikelyTransientChallenge(
+		"https://example.com",
+		"Just a moment...",
+		"Checking your browser before accessing example.com",
+	) {
+		t.Fatalf("expected transient challenge to be detected")
+	}
+
+	if isLikelyTransientChallenge(
+		"https://example.com",
+		"Example Domain",
+		"This domain is for use in illustrative examples.",
+	) {
+		t.Fatalf("did not expect normal page to be marked as transient challenge")
 	}
 }

@@ -29,6 +29,8 @@ type Config struct {
 	ArtifactBaseURL            string
 	RedisAddr                  string
 	PostgresDSN                string
+	APIKey                     string
+	RateLimitPerMinute         int
 	PoolEnabled                bool
 	PoolTargetReady            int
 	PoolReconcileInterval      time.Duration
@@ -76,6 +78,8 @@ func Load() Config {
 		ArtifactBaseURL:            normalizeArtifactBaseURL(os.Getenv("ORCHESTRATOR_ARTIFACT_BASE_URL")),
 		RedisAddr:                  envOrDefault("REDIS_ADDR", "redis:6379"),
 		PostgresDSN:                envOrDefault("POSTGRES_DSN", "postgres://browseruse:browseruse@postgres:5432/browseruse?sslmode=disable"),
+		APIKey:                     strings.TrimSpace(os.Getenv("ORCHESTRATOR_API_KEY")),
+		RateLimitPerMinute:         intOrDefault("ORCHESTRATOR_RATE_LIMIT_PER_MINUTE", 0),
 		PoolEnabled:                boolOrDefault("ORCHESTRATOR_POOL_ENABLED", false),
 		PoolTargetReady:            intOrDefault("ORCHESTRATOR_POOL_TARGET_READY", 0),
 		PoolReconcileInterval:      durationOrDefault("ORCHESTRATOR_POOL_RECONCILE_INTERVAL", 5*time.Second),

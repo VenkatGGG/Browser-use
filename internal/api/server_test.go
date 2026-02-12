@@ -269,6 +269,77 @@ func TestMetricsRoute(t *testing.T) {
 	}
 }
 
+func TestAPISecurityRequiresAPIKeyOnCreateRoutes(t *testing.T) {
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		nil,
+		1,
+		"",
+		nil,
+	)
+	srv.SetAPISecurity("topsecret", 0)
+
+	unauthorizedReq := httptest.NewRequest(http.MethodPost, "/v1/sessions", bytes.NewReader([]byte(`{"tenant_id":"secure"}`)))
+	unauthorizedReq.Header.Set("Content-Type", "application/json")
+	unauthorizedRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(unauthorizedRR, unauthorizedReq)
+	if unauthorizedRR.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without API key, got %d body=%s", unauthorizedRR.Code, unauthorizedRR.Body.String())
+	}
+
+	authorizedReq := httptest.NewRequest(http.MethodPost, "/v1/sessions", bytes.NewReader([]byte(`{"tenant_id":"secure"}`)))
+	authorizedReq.Header.Set("Content-Type", "application/json")
+	authorizedReq.Header.Set("X-API-Key", "topsecret")
+	authorizedRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(authorizedRR, authorizedReq)
+	if authorizedRR.Code != http.StatusCreated {
+		t.Fatalf("expected 201 with API key, got %d body=%s", authorizedRR.Code, authorizedRR.Body.String())
+	}
+}
+
+func TestAPISecurityRateLimitOnCreateRoutes(t *testing.T) {
+	srv := NewServer(
+		session.NewInMemoryService(),
+		task.NewInMemoryService(),
+		pool.NewInMemoryRegistry(),
+		nil,
+		1,
+		"",
+		nil,
+	)
+	srv.SetAPISecurity("", 2)
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/sessions", bytes.NewReader([]byte(`{"tenant_id":"rate"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "10.1.2.3:12345"
+		rr := httptest.NewRecorder()
+		srv.Routes().ServeHTTP(rr, req)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("expected 201 for request %d, got %d body=%s", i+1, rr.Code, rr.Body.String())
+		}
+	}
+
+	limitedReq := httptest.NewRequest(http.MethodPost, "/v1/sessions", bytes.NewReader([]byte(`{"tenant_id":"rate"}`)))
+	limitedReq.Header.Set("Content-Type", "application/json")
+	limitedReq.RemoteAddr = "10.1.2.3:12345"
+	limitedRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(limitedRR, limitedReq)
+	if limitedRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after rate limit exceeded, got %d body=%s", limitedRR.Code, limitedRR.Body.String())
+	}
+
+	// Read-only endpoints remain accessible even when create routes are throttled.
+	healthReq := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	healthRR := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(healthRR, healthReq)
+	if healthRR.Code != http.StatusOK {
+		t.Fatalf("expected healthz status 200, got %d", healthRR.Code)
+	}
+}
+
 func TestLegacySessionRoutes(t *testing.T) {
 	srv := NewServer(
 		session.NewInMemoryService(),
