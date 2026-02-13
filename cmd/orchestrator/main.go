@@ -99,6 +99,9 @@ func main() {
 			PlannerTimeout:     cfg.PoolNodePlannerTimeout,
 			PlannerMaxElements: cfg.PoolNodePlannerMaxElements,
 			TraceScreenshots:   cfg.PoolNodeTraceScreenshots,
+			EgressMode:         cfg.PoolNodeEgressMode,
+			EgressAllowHosts:   cfg.PoolNodeEgressAllowHosts,
+			SeccompProfile:     cfg.PoolNodeSeccompProfile,
 			XVFBScreenGeometry: cfg.PoolXVFBScreenGeometry,
 			ChromeDebugPort:    cfg.PoolChromeDebugPort,
 		})

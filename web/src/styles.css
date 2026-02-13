@@ -72,6 +72,30 @@ body {
   font-weight: 600;
 }
 
+.quickFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.quickFilters label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: #3e4e55;
+}
+
+.quickFilters button {
+  border: 1px solid #d6ccc0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
 .composePane {
   border: 1px solid #d6ccc0;
   border-radius: 10px;

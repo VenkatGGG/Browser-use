@@ -33,6 +33,9 @@ type LocalDockerProviderConfig struct {
 	PlannerTimeout     time.Duration
 	PlannerMaxElements int
 	TraceScreenshots   bool
+	EgressMode         string
+	EgressAllowHosts   string
+	SeccompProfile     string
 	XVFBScreenGeometry string
 	ChromeDebugPort    int
 	DefaultMemoryLimit string
@@ -90,6 +93,18 @@ func NewLocalDockerProvider(cfg LocalDockerProviderConfig) (*LocalDockerProvider
 	if strings.TrimSpace(cfg.XVFBScreenGeometry) == "" {
 		cfg.XVFBScreenGeometry = "1280x720x24"
 	}
+	if strings.TrimSpace(cfg.EgressMode) == "" {
+		cfg.EgressMode = "open"
+	}
+	cfg.EgressMode = strings.ToLower(strings.TrimSpace(cfg.EgressMode))
+	switch cfg.EgressMode {
+	case "open", "public_only", "deny_all":
+	default:
+		return nil, fmt.Errorf("invalid docker provider egress mode %q (allowed: open, public_only, deny_all)", cfg.EgressMode)
+	}
+	if strings.TrimSpace(cfg.SeccompProfile) == "" {
+		cfg.SeccompProfile = "default"
+	}
 	if cfg.ChromeDebugPort <= 0 {
 		cfg.ChromeDebugPort = 9222
 	}
@@ -132,8 +147,12 @@ func (p *LocalDockerProvider) ProvisionNode(ctx context.Context, input Provision
 		"NODE_AGENT_PLANNER_TIMEOUT":      p.cfg.PlannerTimeout.String(),
 		"NODE_AGENT_PLANNER_MAX_ELEMENTS": fmt.Sprintf("%d", p.cfg.PlannerMaxElements),
 		"NODE_AGENT_TRACE_SCREENSHOTS":    fmt.Sprintf("%t", p.cfg.TraceScreenshots),
+		"NODE_AGENT_EGRESS_MODE":          p.cfg.EgressMode,
 		"CHROME_DEBUG_PORT":               fmt.Sprintf("%d", p.cfg.ChromeDebugPort),
 		"XVFB_SCREEN_GEOMETRY":            p.cfg.XVFBScreenGeometry,
+	}
+	if allowHosts := strings.TrimSpace(p.cfg.EgressAllowHosts); allowHosts != "" {
+		envVars["NODE_AGENT_EGRESS_ALLOW_HOSTS"] = allowHosts
 	}
 	if endpoint := strings.TrimSpace(p.cfg.PlannerEndpointURL); endpoint != "" {
 		envVars["NODE_AGENT_PLANNER_ENDPOINT_URL"] = endpoint
@@ -145,23 +164,28 @@ func (p *LocalDockerProvider) ProvisionNode(ctx context.Context, input Provision
 		envVars["NODE_AGENT_PLANNER_MODEL"] = model
 	}
 
+	networkName := p.cfg.Network
+	if p.cfg.EgressMode == "deny_all" {
+		networkName = "none"
+	}
+
 	args := []string{
 		"run", "-d",
 		"--name", containerName,
-		"--network", p.cfg.Network,
+		"--network", networkName,
 		"--read-only",
 		"--tmpfs", "/tmp:size=1g,noexec,nosuid,nodev",
 		"--tmpfs", "/home/nodeagent:size=256m,noexec,nosuid,nodev",
 		"--tmpfs", "/var/log/browser-node:size=64m,noexec,nosuid,nodev",
 		"--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges:true",
+		"--security-opt", "seccomp=" + p.cfg.SeccompProfile,
 		"--pids-limit", fmt.Sprintf("%d", p.cfg.DefaultPIDsLimit),
 		"--memory", p.cfg.DefaultMemoryLimit,
 		"--cpus", p.cfg.DefaultCPULimit,
 		"--label", "browseruse.managed=true",
 		"--label", fmt.Sprintf("browseruse.node_id=%s", nodeID),
 	}
-
 	labelKeys := make([]string, 0, len(input.Labels))
 	for key := range input.Labels {
 		labelKeys = append(labelKeys, key)

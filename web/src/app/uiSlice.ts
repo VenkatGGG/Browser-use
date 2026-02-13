@@ -11,6 +11,9 @@ interface UIState {
   refreshMs: number;
   live: boolean;
   sort: SortOrder;
+  artifactsOnly: boolean;
+  blockersOnly: boolean;
+  failuresOnly: boolean;
 }
 
 const initialState: UIState = {
@@ -20,7 +23,10 @@ const initialState: UIState = {
   taskLimit: 120,
   refreshMs: 3000,
   live: true,
-  sort: "newest"
+  sort: "newest",
+  artifactsOnly: false,
+  blockersOnly: false,
+  failuresOnly: false
 };
 
 const uiSlice = createSlice({
@@ -47,6 +53,20 @@ const uiSlice = createSlice({
     },
     setSort(state, action: PayloadAction<SortOrder>) {
       state.sort = action.payload;
+    },
+    setArtifactsOnly(state, action: PayloadAction<boolean>) {
+      state.artifactsOnly = action.payload;
+    },
+    setBlockersOnly(state, action: PayloadAction<boolean>) {
+      state.blockersOnly = action.payload;
+    },
+    setFailuresOnly(state, action: PayloadAction<boolean>) {
+      state.failuresOnly = action.payload;
+    },
+    clearQuickFilters(state) {
+      state.artifactsOnly = false;
+      state.blockersOnly = false;
+      state.failuresOnly = false;
     }
   }
 });
@@ -58,7 +78,11 @@ export const {
   setTaskLimit,
   setRefreshMs,
   setLive,
-  setSort
+  setSort,
+  setArtifactsOnly,
+  setBlockersOnly,
+  setFailuresOnly,
+  clearQuickFilters
 } = uiSlice.actions;
 
 export default uiSlice.reducer;

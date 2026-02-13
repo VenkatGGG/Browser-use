@@ -14,6 +14,10 @@ import {
 } from "./api/client";
 import { useAppDispatch, useAppSelector } from "./app/hooks";
 import {
+  clearQuickFilters,
+  setArtifactsOnly,
+  setBlockersOnly,
+  setFailuresOnly,
   setLive,
   setQuery,
   setRefreshMs,
@@ -37,6 +41,11 @@ function statusClass(status: string): string {
 function isCancelable(task: TaskItem): boolean {
   const s = String(task.status || "").toLowerCase();
   return s === "queued" || s === "running";
+}
+
+function hasArtifact(task: TaskItem): boolean {
+  if (task.screenshot_artifact_url) return true;
+  return Boolean(task.trace?.some((step) => Boolean(step.screenshot_artifact_url)));
 }
 
 function fmt(value?: string): string {
@@ -142,8 +151,17 @@ export function App() {
       if (ui.statusFilter !== "all" && String(task.status).toLowerCase() !== String(ui.statusFilter).toLowerCase()) {
         return false;
       }
+      if (ui.failuresOnly && String(task.status || "").toLowerCase() !== "failed") {
+        return false;
+      }
+      if (ui.blockersOnly && !String(task.blocker_type || "").trim()) {
+        return false;
+      }
+      if (ui.artifactsOnly && !hasArtifact(task)) {
+        return false;
+      }
       if (!q) return true;
-      const blob = [task.id, task.goal, task.url, task.final_url, task.node_id, task.error_message]
+      const blob = [task.id, task.goal, task.url, task.final_url, task.node_id, task.error_message, task.blocker_type, task.blocker_message]
         .map((x) => String(x || "").toLowerCase())
         .join(" ");
       return blob.includes(q);
@@ -154,7 +172,7 @@ export function App() {
       return ui.sort === "oldest" ? at - bt : bt - at;
     });
     return rows;
-  }, [tasks, ui.query, ui.sort, ui.statusFilter]);
+  }, [tasks, ui.artifactsOnly, ui.blockersOnly, ui.failuresOnly, ui.query, ui.sort, ui.statusFilter]);
 
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === ui.selectedTaskID) ?? null,
@@ -301,6 +319,35 @@ export function App() {
           </select>
         </label>
         <button onClick={() => dispatch(setLive(!ui.live))}>{ui.live ? "Pause" : "Resume"} Polling</button>
+      </section>
+      <section className="quickFilters">
+        <label>
+          <input
+            type="checkbox"
+            checked={ui.failuresOnly}
+            onChange={(e) => dispatch(setFailuresOnly(e.target.checked))}
+          />
+          Failed only
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={ui.blockersOnly}
+            onChange={(e) => dispatch(setBlockersOnly(e.target.checked))}
+          />
+          Blockers only
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={ui.artifactsOnly}
+            onChange={(e) => dispatch(setArtifactsOnly(e.target.checked))}
+          />
+          Artifacts only
+        </label>
+        <button type="button" onClick={() => dispatch(clearQuickFilters())}>
+          Clear quick filters
+        </button>
       </section>
 
       <section className="kpis">

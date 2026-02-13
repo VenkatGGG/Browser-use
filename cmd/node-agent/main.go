@@ -9,7 +9,9 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/netip"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -43,6 +45,8 @@ type config struct {
 	PlannerTimeout     time.Duration
 	PlannerMaxElements int
 	TraceScreenshots   bool
+	EgressMode         string
+	EgressAllowHosts   []string
 }
 
 type registerNodeRequest struct {
@@ -111,6 +115,8 @@ type browserExecutor struct {
 	executeTimeout   time.Duration
 	planner          actionPlanner
 	traceScreenshots bool
+	egressMode       string
+	egressAllowHosts []string
 	mu               sync.Mutex
 }
 
@@ -128,6 +134,8 @@ func newBrowserExecutor(cfg config) *browserExecutor {
 			MaxElements: cfg.PlannerMaxElements,
 		}),
 		traceScreenshots: cfg.TraceScreenshots,
+		egressMode:       normalizeEgressMode(cfg.EgressMode),
+		egressAllowHosts: append([]string(nil), cfg.EgressAllowHosts...),
 	}
 }
 
@@ -157,6 +165,9 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 	url := strings.TrimSpace(targetURL)
 	if url == "" {
 		return executeResponse{}, errors.New("url is required")
+	}
+	if err := validateEgressTarget(ctx, url, e.egressMode, e.egressAllowHosts); err != nil {
+		return executeResponse{}, err
 	}
 	traceID = strings.TrimSpace(traceID)
 	if traceID != "" {
@@ -267,6 +278,21 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 		step.CompletedAt = finished
 		step.DurationMS = finished.Sub(started).Milliseconds()
 		step.OutputText = strings.TrimSpace(outputText)
+		if currentURL, evalErr := client.EvaluateString(runCtx, "window.location.href"); evalErr == nil {
+			if policyErr := validateEgressTarget(runCtx, currentURL, e.egressMode, e.egressAllowHosts); policyErr != nil {
+				step.Status = "failed"
+				step.Error = policyErr.Error()
+				trace = append(trace, step)
+				return executeResponse{
+					Trace: append([]executeTraceStep(nil), trace...),
+				}, &executeFlowError{
+					message: fmt.Sprintf("action %d (%s) failed: %v", index+1, action.Type, policyErr),
+					result: executeResponse{
+						Trace: append([]executeTraceStep(nil), trace...),
+					},
+				}
+			}
+		}
 		if e.traceScreenshots {
 			if screenshot, shotErr := client.CaptureScreenshot(runCtx); shotErr == nil {
 				step.ScreenshotBase64 = screenshot
@@ -783,6 +809,8 @@ func loadConfig() config {
 		PlannerTimeout:     durationOrDefault("NODE_AGENT_PLANNER_TIMEOUT", 8*time.Second),
 		PlannerMaxElements: intOrDefault("NODE_AGENT_PLANNER_MAX_ELEMENTS", 48),
 		TraceScreenshots:   boolOrDefault("NODE_AGENT_TRACE_SCREENSHOTS", false),
+		EgressMode:         envOrDefault("NODE_AGENT_EGRESS_MODE", "open"),
+		EgressAllowHosts:   parseCSV(os.Getenv("NODE_AGENT_EGRESS_ALLOW_HOSTS")),
 	}
 }
 
@@ -918,6 +946,121 @@ func guessAdvertiseAddr(httpAddr string) string {
 	}
 
 	return net.JoinHostPort(host, port)
+}
+
+func normalizeEgressMode(raw string) string {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	switch mode {
+	case "", "open":
+		return "open"
+	case "public_only":
+		return "public_only"
+	case "deny_all":
+		return "deny_all"
+	default:
+		return "open"
+	}
+}
+
+func validateEgressTarget(ctx context.Context, rawURL, mode string, allowHosts []string) error {
+	mode = normalizeEgressMode(mode)
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return nil
+	}
+	if mode == "deny_all" {
+		return fmt.Errorf("egress policy blocked navigation: mode=deny_all url=%q", trimmed)
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return fmt.Errorf("invalid url %q: %w", trimmed, err)
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return fmt.Errorf("egress policy blocked navigation: empty host in url %q", trimmed)
+	}
+	if len(allowHosts) > 0 && !hostAllowed(host, allowHosts) {
+		return fmt.Errorf("egress policy blocked host %q (not in NODE_AGENT_EGRESS_ALLOW_HOSTS)", host)
+	}
+	if mode != "public_only" {
+		return nil
+	}
+
+	if isLocalHostname(host) {
+		return fmt.Errorf("egress policy blocked local/private host %q", host)
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		if isPrivateOrLocalIP(ip) {
+			return fmt.Errorf("egress policy blocked local/private ip %q", host)
+		}
+		return nil
+	}
+
+	resolveCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupNetIP(resolveCtx, "ip", host)
+	if err != nil {
+		return fmt.Errorf("egress policy blocked host %q (dns lookup failed: %v)", host, err)
+	}
+	for _, ip := range addrs {
+		if isPrivateOrLocalIP(ip) {
+			return fmt.Errorf("egress policy blocked host %q resolved to local/private ip %s", host, ip.String())
+		}
+	}
+	return nil
+}
+
+func hostAllowed(host string, allowHosts []string) bool {
+	target := strings.ToLower(strings.TrimSpace(host))
+	for _, item := range allowHosts {
+		candidate := strings.ToLower(strings.TrimSpace(item))
+		if candidate == "" {
+			continue
+		}
+		if strings.HasPrefix(candidate, "*.") {
+			suffix := strings.TrimPrefix(candidate, "*.")
+			if target == suffix || strings.HasSuffix(target, "."+suffix) {
+				return true
+			}
+			continue
+		}
+		if target == candidate || strings.HasSuffix(target, "."+candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func isLocalHostname(host string) bool {
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "localhost", "localhost.localdomain":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPrivateOrLocalIP(ip netip.Addr) bool {
+	addr := ip.Unmap()
+	if addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalMulticast() || addr.IsLinkLocalUnicast() || addr.IsMulticast() || addr.IsUnspecified() {
+		return true
+	}
+	// Carrier-grade NAT range 100.64.0.0/10.
+	cgnatPrefix := netip.MustParsePrefix("100.64.0.0/10")
+	return cgnatPrefix.Contains(addr)
+}
+
+func parseCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func envOrDefault(key, fallback string) string {
