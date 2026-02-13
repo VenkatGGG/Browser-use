@@ -37,27 +37,36 @@ Tasks flow through the system as follows:
 
 ```mermaid
 flowchart TD
-    A["User submits goal (natural language)"] --> B["Orchestrator"]
-    B --> C["Enqueue task in PostgreSQL"]
-    C --> D["Lease a ready browser-node"]
-    D --> E["Dispatch via gRPC"]
-    E --> F["Node-Agent"]
-    F --> G["Launch Chromium + navigate to URL"]
-    G --> H{"Actions provided?"}
-    H -- Yes --> J["Execute CDP action chain"]
-    H -- No --> I["AI Planner"]
-    I --> I1["Snapshot DOM state"]
-    I1 --> I2["Send to LLM (Gemini / OpenAI)"]
-    I2 --> I3["Receive typed action plan"]
+    A["User submits goal"]:::user --> B["Orchestrator receives request"]:::orch
+    B --> C["Enqueue task in PostgreSQL"]:::data
+    C --> D["Lease a ready browser-node"]:::orch
+    D --> E["Dispatch task via gRPC"]:::orch
+    E --> F["Node-Agent receives task"]:::sandbox
+    F --> G["Launch Chromium + navigate to URL"]:::sandbox
+    G --> H{"Actions provided?"}:::decision
+    H -- Yes --> J["Execute CDP action chain"]:::sandbox
+    H -- No --> I["AI Planner"]:::ai
+    I --> I1["Snapshot live DOM state"]:::ai
+    I1 --> I2["Send goal + DOM to LLM"]:::ai
+    I2 --> I3["Receive typed action plan"]:::ai
     I3 --> J
-    J --> K["Capture screenshot artifact"]
-    K --> L["Report trace + result to orchestrator"]
-    L --> M["Persist result, trace, screenshot URL"]
-    M --> N["Release node lease"]
-    N --> O{"Transient failure?"}
-    O -- Yes --> P["Retry with exponential backoff"]
+    J --> K["Capture screenshot artifact"]:::sandbox
+    K --> L["Report trace + result"]:::sandbox
+    L --> M["Persist to PostgreSQL"]:::data
+    M --> N["Release node lease"]:::orch
+    N --> O{"Transient failure?"}:::decision
+    O -- Yes --> P["Retry with backoff"]:::retry
     P --> D
-    O -- No --> Q["Task complete"]
+    O -- No --> Q["Task complete"]:::done
+
+    classDef user fill:#e8eaf6,stroke:#3949ab,color:#1a237e,stroke-width:2px
+    classDef orch fill:#e3f2fd,stroke:#1565c0,color:#0d47a1,stroke-width:2px
+    classDef sandbox fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20,stroke-width:2px
+    classDef ai fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c,stroke-width:2px
+    classDef data fill:#fff3e0,stroke:#e65100,color:#bf360c,stroke-width:2px
+    classDef decision fill:#fff9c4,stroke:#f9a825,color:#f57f17,stroke-width:2px
+    classDef retry fill:#fce4ec,stroke:#c62828,color:#b71c1c,stroke-width:2px
+    classDef done fill:#e0f2f1,stroke:#00695c,color:#004d40,stroke-width:2px
 ```
 
 ---
@@ -66,39 +75,60 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    subgraph Client
-        DASH["Dashboard (React)"]
+    subgraph CLIENT ["Client Layer"]
+        DASH["Dashboard\n(React + Redux)"]:::client
     end
 
-    subgraph Orchestrator
-        ORC["Orchestrator (Go, :8080)"]
-        ORC --- TQ["Task Queue"]
-        ORC --- SM["Session Mgmt"]
-        ORC --- NR["Node Registry"]
-        ORC --- LM["Lease Manager"]
-        ORC --- RE["Retry Engine"]
+    subgraph CORE ["Orchestrator Core"]
+        ORC["Orchestrator\n(Go, :8080)"]:::orch
+        TQ["Task Queue"]:::orch_int
+        SM["Session Mgmt"]:::orch_int
+        NR["Node Registry"]:::orch_int
+        LM["Lease Manager"]:::orch_int
+        RE["Retry Engine"]:::orch_int
+        ORC --- TQ
+        ORC --- SM
+        ORC --- NR
+        ORC --- LM
+        ORC --- RE
     end
 
-    subgraph Data
-        PG[("PostgreSQL")]
-        RD[("Redis")]
+    subgraph STORE ["Data Layer"]
+        PG[("PostgreSQL\n(state store)")]:::data
+        RD[("Redis\n(queue + locks)")]:::data
     end
 
-    subgraph Sandbox 1
-        NA1["node-agent"] --> CR1["Chromium"]
-        CR1 --> XV1["Xvfb"]
+    subgraph SB1 ["Sandbox 1 (Docker)"]
+        NA1["node-agent"]:::agent --> CR1["Chromium"]:::browser
+        CR1 --> XV1["Xvfb"]:::browser
+        NA1 -.->|CDP| CR1
     end
 
-    subgraph Sandbox N
-        NAN["node-agent"] --> CRN["Chromium"]
-        CRN --> XVN["Xvfb"]
+    subgraph SBN ["Sandbox N (Docker)"]
+        NAN["node-agent"]:::agent --> CRN["Chromium"]:::browser
+        CRN --> XVN["Xvfb"]:::browser
+        NAN -.->|CDP| CRN
     end
 
-    DASH <-->|HTTP| ORC
-    ORC <-->|gRPC| NA1
-    ORC <-->|gRPC| NAN
-    ORC --> PG
-    ORC --> RD
+    subgraph LLM ["AI Layer"]
+        PLAN["LLM Planner\n(Gemini / OpenAI)"]:::ai
+    end
+
+    DASH <-->|"HTTP / WebSocket"| ORC
+    ORC <-->|"gRPC"| NA1
+    ORC <-->|"gRPC"| NAN
+    ORC -->|"read/write"| PG
+    ORC -->|"enqueue/lock"| RD
+    NA1 -.->|"plan request"| PLAN
+    NAN -.->|"plan request"| PLAN
+
+    classDef client fill:#e0f7fa,stroke:#00838f,color:#004d40,stroke-width:2px
+    classDef orch fill:#e3f2fd,stroke:#1565c0,color:#0d47a1,stroke-width:2px
+    classDef orch_int fill:#bbdefb,stroke:#1976d2,color:#0d47a1,stroke-width:1px
+    classDef data fill:#fff3e0,stroke:#e65100,color:#bf360c,stroke-width:2px
+    classDef agent fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20,stroke-width:2px
+    classDef browser fill:#f1f8e9,stroke:#558b2f,color:#33691e,stroke-width:1px
+    classDef ai fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c,stroke-width:2px
 ```
 
 ### Key Design Decisions
