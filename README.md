@@ -1,222 +1,157 @@
 # Browser-use
 
-Local-first orchestration infrastructure for AI browser automation.
+An AI agent-driven browser orchestration engine. A distributed system that autonomously operates sandboxed Chromium workers to execute multi-step browser workflows from natural-language goals, without predefined scripts.
 
-## Current implementation status
+---
 
-### Phase 0 complete
-- Go project structure scaffolded: `cmd`, `internal`, `pkg`, `proto`, `deploy`, `docker`.
-- Orchestrator HTTP API skeleton:
-  - `GET /healthz`
-  - `POST /v1/sessions` (alias: `POST /sessions`)
-  - `DELETE /v1/sessions/{id}` (alias: `DELETE /sessions/{id}`)
-  - `POST /v1/tasks` (alias: `POST /task`)
-  - `GET /v1/tasks/{id}` (alias: `GET /tasks/{id}`)
-- Node-agent bootstrap binary with health endpoint.
-- Node gRPC contract defined in `/proto/node.proto` with generated Go stubs in `/internal/gen`.
+## Table of Contents
 
-### Phase 1 complete (local infra baseline)
-- Docker Compose stack with:
-  - `orchestrator`
-  - `redis`
-  - `postgres`
-- One-command local startup via `make up` with docker preflight checks and readiness wait (`/healthz`).
-- `.env` template in `deploy/compose/.env.example`.
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Technology Stack](#technology-stack)
+- [Getting Started](#getting-started)
+- [API Reference](#api-reference)
+- [Dashboard](#dashboard)
+- [AI Agent Planner](#ai-agent-planner)
+- [Configuration Reference](#configuration-reference)
+- [Security and Sandboxing](#security-and-sandboxing)
+- [Challenges and Anti-Bot Detection](#challenges-and-anti-bot-detection)
+- [Roadmap](#roadmap)
+- [Development Commands](#development-commands)
+- [Project Structure](#project-structure)
+- [Notes](#notes)
 
-### Phase 2 complete (hardened browser sandbox)
-- `browser-node` container now includes:
-  - `google-chrome-stable` on `amd64` (falls back to `chromium` on `arm64`)
-  - `Xvfb` virtual display
-  - `playwright-core` runtime
-  - `node-agent` sidecar (HTTP health + gRPC control plane)
-- Node phone-home API flow implemented:
-  - `POST /v1/nodes/register`
-  - `POST /v1/nodes/{id}/heartbeat`
-  - `GET /v1/nodes`
-- Orchestrator now executes node actions through gRPC (`execute_flow`) instead of direct HTTP calls.
-- Runtime hardening applied in compose:
-  - non-root node process
-  - read-only root filesystem
-  - tmpfs for writable runtime paths
-  - dropped Linux capabilities + `no-new-privileges`
-  - CPU/memory/pid limits
-  - Chrome debug port is no longer publicly published.
+---
 
-### Phase 3 complete (local provider + warm pool)
-- Warm-pool control loop implemented in `internal/pool/manager.go`:
-  - maintains target ready count
-  - scales down surplus managed ready nodes back to target
-  - tracks `warming` nodes and times them out
-  - reaps stale nodes on heartbeat timeout
-  - reaps old nodes by max-age
-- Local Docker provider implemented in `internal/pool/local_docker_provider.go`:
-  - provisions isolated browser-node containers
-  - assigns deterministic node IDs and gRPC addresses
-  - destroys managed nodes by ID
-- Orchestrator wiring added (feature-flagged):
-  - `ORCHESTRATOR_POOL_ENABLED=true`
-  - `ORCHESTRATOR_POOL_TARGET_READY=<N>`
-  - provider/manager config from `ORCHESTRATOR_POOL_*` env vars
+## Overview
 
-### Phase 4 started (lease safety + idempotency)
-- Runner now supports distributed node leasing with fencing tokens:
-  - `internal/lease` package (in-memory + Redis implementations)
-  - lease TTL via `ORCHESTRATOR_NODE_LEASE_TTL`
-  - active lease keepalive/renewal during task execution to prevent lease expiry on long-running tasks
-  - lease state is reflected in node registry (`leased_until`)
-- API idempotency support added for creates:
-  - `POST /v1/sessions` and `POST /v1/tasks`
-  - `POST /v1/tasks/{id}/replay`
-  - send `Idempotency-Key` header to get safe retries without duplicate resources
-  - `internal/idempotency` package (in-memory + Redis implementations)
-  - retention and lock TTL via:
-    - `ORCHESTRATOR_IDEMPOTENCY_TTL`
-    - `ORCHESTRATOR_IDEMPOTENCY_LOCK_TTL`
+Browser-use is a local-first orchestration engine that converts high-level goals (e.g., "search for browser use on DuckDuckGo and take a screenshot") into concrete browser actions and executes them inside isolated Chromium containers.
 
-### Phase 5 started (brain execution baseline)
-- Orchestrator now enqueues task requests and executes them asynchronously in background workers.
-- `node-agent` exposes `POST /v1/execute` and runs CDP actions:
-  - open URL
-  - deterministic action primitives: `wait_for`, `click`, `type`, `wait`
-  - wait render delay
-  - capture screenshot
-  - extract page title + final URL
-- Task lifecycle is tracked:
-  - `queued -> running -> completed|failed`
-- `POST /v1/tasks` returns immediately (`202 Accepted`) by default; use `GET /v1/tasks/{id}` for progress/result.
-- `POST /task` defaults to wait for terminal state and returns final task payload (`200 OK`) unless `wait_for_completion` is explicitly set to `false`.
-- `POST /v1/tasks/{id}/replay` clones an existing task and re-queues it (supports optional `session_id` or `create_new_session` + `tenant_id`, `max_retries` overrides, and tracks lineage via `source_task_id`).
-- `POST /v1/tasks/{id}/cancel` cancels queued or running tasks (running executions are interrupted by the runner).
-- `GET /v1/tasks/{id}/replay_chain` returns replay lineage (task -> parent -> root).
-- `GET /v1/tasks/{id}/replays` returns direct replay children for a task.
-- Completed tasks store screenshots as artifacts and expose `screenshot_artifact_url`.
-- Runner retries transient failures with exponential backoff (`max_retries` per task).
-  - Defaults are configurable via:
-    - `ORCHESTRATOR_TASK_MAX_RETRIES`
-    - `ORCHESTRATOR_TASK_RETRY_BASE_DELAY`
-    - `ORCHESTRATOR_TASK_RETRY_MAX_DELAY`
-    - `ORCHESTRATOR_TASK_DOMAIN_BLOCK_COOLDOWN`
-- When `actions` is omitted, node-agent can auto-plan simple search flows from `goal`
-  using a built-in template planner (`NODE_AGENT_PLANNER_MODE=template`).
+The system consists of three main components:
 
-### Phase 6 started (compact context planner path)
-- Node-agent now builds a compact planner state packet from visible interactive elements only:
-  - stable element ids (`stable_id`)
-  - role/name/text/selector
-  - viewport coordinates + dimensions
-- Added optional external planner mode:
-  - `NODE_AGENT_PLANNER_MODE=endpoint`
-  - `NODE_AGENT_PLANNER_ENDPOINT_URL=<planner-api>`
-  - optional auth/model controls:
-    - `NODE_AGENT_PLANNER_AUTH_TOKEN`
-    - `NODE_AGENT_PLANNER_MODEL`
-    - `NODE_AGENT_PLANNER_TIMEOUT`
-    - `NODE_AGENT_PLANNER_MAX_ELEMENTS`
-- Added optional built-in model planner mode:
-  - `NODE_AGENT_PLANNER_MODE=openai`
-  - uses OpenAI Chat Completions API directly from node-agent
-  - defaults to `https://api.openai.com/v1/chat/completions`
-  - configure with:
-    - `NODE_AGENT_PLANNER_AUTH_TOKEN` (OpenAI API key)
-    - `NODE_AGENT_PLANNER_MODEL` (defaults to `gpt-4o-mini`)
-    - `NODE_AGENT_PLANNER_ENDPOINT_URL` (optional custom-compatible endpoint)
-    - `NODE_AGENT_PLANNER_TIMEOUT`
-    - `NODE_AGENT_PLANNER_MAX_ELEMENTS`
-- Endpoint planner has safe fallback to deterministic heuristic planning on endpoint failures/invalid output.
-- Built-in template planner now handles common commerce extraction goals (for example: search + extract price) without external planner services.
-- Extraction robustness improved for planner-driven `extract_text` flows:
-  - ordered selector fallback attempts (`selector_a || selector_b || selector_c`)
-  - extraction-type hints (`price`, `rating`, `title`) with lightweight validation before accepting output
-- Task records now persist execution trace steps (`trace`) including action payload, step status, timing, and failure reason when available.
-- Optional trace step screenshots can be enabled with `NODE_AGENT_TRACE_SCREENSHOTS=true` (or `ORCHESTRATOR_POOL_NODE_TRACE_SCREENSHOTS=true` for managed warm-pool nodes).
-- Added fixture-driven planner regression harness:
-  - planner eval fixtures in `cmd/node-agent/testdata/planner_eval_cases.json`
-  - run with `make planner-eval` (or `go test ./cmd/node-agent -run TestPlannerEvalFixtures -count=1 -v`)
+1. **Orchestrator** -- a Go HTTP/gRPC server that manages sessions, queues tasks, leases browser nodes, and tracks execution state in PostgreSQL.
+2. **Node-Agent** -- a sidecar binary running inside each browser container. It receives gRPC commands from the orchestrator, drives Chromium via the Chrome DevTools Protocol (CDP), captures screenshots, and reports execution traces.
+3. **AI Planner** -- an LLM-backed planning layer (Gemini, OpenAI, or any compatible endpoint) that interprets natural-language goals, inspects live DOM state, and compiles typed action sequences at inference time.
 
-### Phase 4 started (dashboard)
-- Orchestrator now serves a live dashboard at `GET /dashboard`.
-- Dashboard includes:
-  - node fleet cards with heartbeat + version metadata
-  - live polling controls (pause/resume, refresh interval, fetch limit)
-  - filtered task feed (status/search/artifact/failure/blocker/sort)
-  - per-row quick actions (replay/cancel where applicable) in task feed
-  - batch/shortcut operator controls (cancel visible, replay/cancel selected, keyboard navigation)
-  - blocker-aware task table column + blocker KPIs (count and rate)
-  - selectable task detail panel with metadata, lineage jump-to-source, action JSON, and replay
-  - task cancellation action for queued/running tasks directly from task detail
-  - screenshot artifact preview modal and failure triage list
-  - task submission form with reusable presets (session creation + queue task)
-  - embedded HTML asset at `internal/api/assets/dashboard.html`
-- Added lightweight Prometheus-style metrics endpoint:
-  - `GET /metrics`
-  - task status totals, success/block rates, blocker totals, node state totals
-  - `browseruse_tasks_p95_step_latency_ms` from recent task trace timings
-  - `browseruse_tasks_sandbox_crash_total` and `browseruse_tasks_sandbox_crash_rate_percent`
-  - optional window control: `GET /metrics?limit=1000`
-- Frontend split started:
-  - new TypeScript dashboard workspace in `web/` (React + Redux Toolkit + TanStack Query)
-  - Redux handles local UI state (filters/selection/polling settings)
-  - TanStack Query handles server state (polling/caching/mutations for tasks/nodes/stats)
-  - backend API routes remain unchanged (`/v1/*`)
-  - `/dashboard` now serves `web/dist/index.html` when a built frontend is available (or when `ORCHESTRATOR_DASHBOARD_DIST` is set); non-built environments show a minimal fallback page with build instructions
+Tasks flow through the system as follows:
 
-## Quick start
+```
+User Goal (natural language)
+    |
+    v
+Orchestrator (HTTP API)
+    |-- enqueue task in PostgreSQL
+    |-- lease a ready browser-node
+    |-- dispatch via gRPC
+    v
+Node-Agent (inside container)
+    |-- launch Chromium + navigate to URL
+    |-- if no actions provided: call AI Planner
+    |   |-- snapshot DOM state
+    |   |-- send to LLM (Gemini / OpenAI)
+    |   |-- receive typed action plan
+    |-- execute CDP action chain
+    |   |-- wait_for, click, type, scroll, extract_text, press_enter, wait
+    |-- capture screenshot artifact
+    |-- report trace + result back to orchestrator
+    v
+Orchestrator
+    |-- persist result, trace, screenshot URL
+    |-- release node lease
+    |-- retry on transient failure (exponential backoff)
+```
 
-1. Initialize env and boot the stack:
+---
+
+## Architecture
+
+```
+                              +-------------------+
+                              |   PostgreSQL      |
+                              |   (state store)   |
+                              +--------+----------+
+                                       |
++-------------+              +---------+---------+              +------------------+
+|  Dashboard  |  <--HTTP-->  |   Orchestrator    |  <--gRPC-->  |  Browser Node 1  |
+|  (React)    |              |   (Go, port 8080) |              |  - Chromium      |
++-------------+              |                   |              |  - Xvfb          |
+                             |  - Task queue     |              |  - node-agent    |
+                             |  - Session mgmt   |              +------------------+
+                             |  - Node registry  |
+                             |  - Lease manager   |              +------------------+
+                             |  - Retry engine   |  <--gRPC-->  |  Browser Node N  |
+                             +--------+----------+              |  - Chromium      |
+                                      |                         |  - Xvfb          |
+                              +-------+-------+                 |  - node-agent    |
+                              |    Redis      |                 +------------------+
+                              |  (queue, locks)|
+                              +---------------+
+```
+
+### Key Design Decisions
+
+- **gRPC over HTTP for node control**: The orchestrator communicates with browser nodes over gRPC for type-safe, low-latency command dispatch. HTTP is used only for the external-facing API.
+- **CDP over WebDriver**: The node-agent drives Chromium directly via CDP rather than Selenium/WebDriver. This provides lower-level control over navigation, DOM inspection, and screenshot capture.
+- **Fencing tokens for lease safety**: Each node lease carries a fencing token. If a lease expires mid-execution (due to a slow task), the orchestrator will not accept stale results.
+- **Write-ahead tracing**: Every action step is persisted to PostgreSQL as it executes, not after. If a node crashes mid-task, the partial trace survives.
+- **Deterministic fallback**: When the LLM planner fails or returns malformed output, the system falls back to a deterministic heuristic planner. This ensures zero-downtime operation regardless of model reliability.
+
+---
+
+## Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Language | Go 1.22+ |
+| Node-to-Orchestrator RPC | gRPC + Protobuf |
+| Browser Control | Chrome DevTools Protocol (CDP) |
+| AI Planning | Gemini 2.5 Flash (or any OpenAI-compatible API) |
+| Task State | PostgreSQL |
+| Queue and Locks | Redis |
+| Container Runtime | Docker Compose |
+| Dashboard Frontend | React, Redux Toolkit, TypeScript, TanStack Query |
+| Browser Runtime | google-chrome-stable (amd64), chromium (arm64) |
+| Virtual Display | Xvfb |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Docker and Docker Compose
+- Go 1.22+ (for development and testing)
+- Node.js 18+ (for dashboard frontend development)
+
+### Quick Start
+
+1. Boot the stack (builds containers, starts all services, waits for health):
 ```bash
 make up
 ```
 
-Alternative local warm-pool mode (host-run orchestrator + dynamic local sandboxes):
-```bash
-make dev-pool
-```
-
-2. Validate API health:
+2. Verify the orchestrator is healthy:
 ```bash
 curl http://localhost:8080/healthz
 ```
 
-3. Validate node registration:
+3. Verify a browser node has registered:
 ```bash
 curl http://localhost:8080/v1/nodes
 ```
 
-4. Create a session:
+4. Run a task with a natural-language goal (auto-plans actions via AI planner):
 ```bash
-curl -sS -X POST http://localhost:8080/v1/sessions \\
-  -H 'Content-Type: application/json' \\
-  -d '{"tenant_id":"local-dev"}'
-```
-
-5. Execute a task (replace `sess_000001` with created session id):
-```bash
-curl -sS -X POST http://localhost:8080/v1/tasks \\
-  -H 'Content-Type: application/json' \\
-  -d '{"session_id":"sess_000001","url":"https://example.com","goal":"open page and capture screenshot","max_retries":2}'
-```
-
-5b. Execute a one-shot task without pre-creating a session (`session_id` auto-created):
-```bash
-curl -sS -X POST http://localhost:8080/task \\
-  -H 'Content-Type: application/json' \\
+curl -sS -X POST http://localhost:8080/task \
+  -H 'Content-Type: application/json' \
   -d '{"url":"https://example.com","goal":"open page and capture screenshot"}'
 ```
 
-Optional (safe retries): add idempotency key for create operations:
+5. Run a task with explicit actions (no AI planner involved):
 ```bash
-curl -sS -X POST http://localhost:8080/v1/tasks \
+curl -sS -X POST http://localhost:8080/task \
   -H 'Content-Type: application/json' \
-  -H 'Idempotency-Key: task-demo-001' \
-  -d '{"session_id":"sess_000001","url":"https://example.com","goal":"open page and capture screenshot"}'
-```
-
-6. Execute a deterministic action flow:
-```bash
-curl -sS -X POST http://localhost:8080/v1/tasks \\
-  -H 'Content-Type: application/json' \\
   -d '{
-    "session_id":"sess_000001",
     "url":"https://duckduckgo.com",
     "goal":"search for browser use",
     "actions":[
@@ -228,106 +163,308 @@ curl -sS -X POST http://localhost:8080/v1/tasks \\
   }'
 ```
 
-Optional async mode for `/task` (return `202 Accepted` immediately):
-```bash
-curl -sS -X POST http://localhost:8080/task \\
-  -H 'Content-Type: application/json' \\
-  -d '{
-    "session_id":"sess_000001",
-    "url":"https://duckduckgo.com",
-    "goal":"search for browser use",
-    "wait_for_completion": false
-  }'
-```
-
-7. Poll task status:
-```bash
-curl -sS http://localhost:8080/v1/tasks/<task-id>
-```
-
-8. Replay an existing task (override session/retries):
-```bash
-curl -sS -X POST http://localhost:8080/v1/tasks/<task-id>/replay \
-  -H 'Content-Type: application/json' \
-  -d '{"session_id":"sess_000001","max_retries":2}'
-```
-
-9. Replay an existing task in a fresh session:
-```bash
-curl -sS -X POST http://localhost:8080/v1/tasks/<task-id>/replay \
-  -H 'Content-Type: application/json' \
-  -d '{"create_new_session":true,"tenant_id":"local-dev","max_retries":2}'
-```
-
-10. Fetch stored screenshot artifact:
-```bash
-curl -sS http://localhost:8080/artifacts/screenshots/<artifact-file>.png --output screenshot.png
-```
-
-11. Run tests:
-```bash
-make test
-```
-
-12. Open the dashboard:
+6. Open the dashboard:
 ```bash
 open http://localhost:8080/dashboard
 ```
 
-13. Poll metrics:
+### Alternative: Local Warm Pool Mode
+
+Run the orchestrator on the host with dynamically provisioned browser containers:
 ```bash
-curl -sS http://localhost:8080/metrics
+make dev-pool
 ```
 
-14. Run local soak test:
+---
+
+## API Reference
+
+### Sessions
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/v1/sessions` | Create a session |
+| `DELETE` | `/v1/sessions/{id}` | Delete a session |
+
+### Tasks
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/v1/tasks` | Queue a task (returns `202 Accepted`) |
+| `POST` | `/task` | Queue and wait for completion (returns `200 OK`) |
+| `GET` | `/v1/tasks/{id}` | Get task status, result, and trace |
+| `GET` | `/v1/tasks?limit=N` | List recent tasks |
+| `GET` | `/v1/tasks/stats?limit=N` | Aggregated task metrics |
+| `POST` | `/v1/tasks/{id}/replay` | Clone and re-queue a task |
+| `POST` | `/v1/tasks/{id}/cancel` | Cancel a queued or running task |
+| `GET` | `/v1/tasks/{id}/replay_chain` | Replay lineage |
+| `GET` | `/v1/tasks/{id}/replays` | Direct replay children |
+
+### Nodes
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/v1/nodes` | List registered browser nodes |
+| `POST` | `/v1/nodes/register` | Node self-registration (internal) |
+| `POST` | `/v1/nodes/{id}/heartbeat` | Node heartbeat (internal) |
+
+### Other
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/healthz` | Orchestrator health check |
+| `GET` | `/metrics` | Prometheus-style metrics |
+| `GET` | `/dashboard` | Operator dashboard |
+| `GET` | `/artifacts/screenshots/{file}` | Stored screenshot artifacts |
+
+### Idempotency
+
+Send an `Idempotency-Key` header on `POST /v1/sessions`, `POST /v1/tasks`, and `POST /v1/tasks/{id}/replay` to get safe retries without duplicate resources.
+
+---
+
+## Dashboard
+
+The operator dashboard provides real-time visibility into the system:
+
+- Node fleet status with heartbeat and version metadata
+- Task feed with filtering by status, search, blockers, failures, and artifacts
+- Task detail panel with metadata, execution trace, lineage, and replay controls
+- Task submission form with session creation
+- Execution trace panel with:
+  - Step-level progress bar (succeeded/failed segments)
+  - Action-type icons and rich summaries
+  - Inline parameter badges (pixels, delay, timeout, selector)
+  - Collapsible step detail with timestamps, output, errors, and screenshots
+- Screenshot preview modal
+- Failure triage list
+- Prometheus-style metrics endpoint
+
+### Running the Dashboard in Development
+
 ```bash
-make soak-local
+make ui-dev    # Vite dev server with hot reload
+make ui-build  # Production build
 ```
 
-## Development commands
+---
+
+## AI Agent Planner
+
+When a task is submitted without explicit `actions`, the node-agent invokes an AI planner to generate an action plan from the goal.
+
+### Planner Modes
+
+| Mode | Description |
+|---|---|
+| `template` | Deterministic heuristic planner (default, no external calls) |
+| `openai` | Direct LLM planning via OpenAI Chat Completions API |
+| `endpoint` | External planner API (bring your own service) |
+
+### Configuring Gemini as the AI Planner
+
+Set these environment variables in `deploy/compose/.env`:
+
+```env
+NODE_AGENT_PLANNER_MODE=openai
+NODE_AGENT_PLANNER_AUTH_TOKEN=<your-google-api-key>
+NODE_AGENT_PLANNER_MODEL=gemini-2.5-flash
+NODE_AGENT_PLANNER_ENDPOINT_URL=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+```
+
+### How It Works
+
+1. The node-agent snapshots the current DOM, extracting visible interactive elements (role, name, text, selector, coordinates).
+2. The snapshot and natural-language goal are sent to the LLM as a structured prompt.
+3. The LLM returns a typed JSON action plan:
+   ```json
+   {
+     "actions": [
+       {"type": "scroll", "text": "down", "pixels": 3000},
+       {"type": "wait", "delay_ms": 500}
+     ]
+   }
+   ```
+4. The node-agent validates and executes each action via CDP.
+
+### Fault Tolerance
+
+- **FlexInt deserialization**: LLMs frequently return numeric values as strings (e.g., `"5000"` instead of `5000`). A custom `FlexInt` JSON codec transparently handles both forms.
+- **Heuristic fallback**: If the LLM returns invalid JSON, times out, or fails entirely, the system falls back to a deterministic template planner.
+- **Structured prompting**: The system prompt explicitly documents each action type with field names, types, and constraints to minimize malformed output.
+
+### Supported Action Types
+
+| Action | Fields | Description |
+|---|---|---|
+| `wait_for` | `selector`, `timeout_ms` | Wait for an element to appear |
+| `click` | `selector` | Click an element |
+| `type` | `selector`, `text` | Type text into an input |
+| `scroll` | `text` ("up"/"down"), `pixels` | Scroll the page |
+| `wait` | `delay_ms` | Pause execution |
+| `extract_text` | `selector` | Extract text content from an element |
+| `press_enter` | `selector` | Press Enter on an element |
+| `wait_for_url_contains` | `text`, `timeout_ms` | Wait for URL to contain a substring |
+
+---
+
+## Configuration Reference
+
+### Orchestrator
+
+| Variable | Description | Default |
+|---|---|---|
+| `ORCHESTRATOR_POOL_ENABLED` | Enable warm-pool node management | `false` |
+| `ORCHESTRATOR_POOL_TARGET_READY` | Target count of ready browser nodes | `1` |
+| `ORCHESTRATOR_NODE_LEASE_TTL` | Lease duration before expiry | `60s` |
+| `ORCHESTRATOR_TASK_MAX_RETRIES` | Default retry count for failed tasks | `2` |
+| `ORCHESTRATOR_TASK_RETRY_BASE_DELAY` | Initial retry delay | `2s` |
+| `ORCHESTRATOR_TASK_RETRY_MAX_DELAY` | Maximum retry delay | `30s` |
+| `ORCHESTRATOR_TASK_DOMAIN_BLOCK_COOLDOWN` | Per-domain cooldown after bot blocks | `5m` |
+| `ORCHESTRATOR_API_KEY` | API key for write endpoints | (none) |
+| `ORCHESTRATOR_RATE_LIMIT_PER_MINUTE` | Per-client rate limit on write endpoints | (none) |
+| `ORCHESTRATOR_DASHBOARD_DIST` | Override path for dashboard frontend bundle | (auto) |
+| `ORCHESTRATOR_IDEMPOTENCY_TTL` | Idempotency key retention | `24h` |
+| `ORCHESTRATOR_IDEMPOTENCY_LOCK_TTL` | Idempotency lock duration | `30s` |
+
+### Node-Agent / Planner
+
+| Variable | Description | Default |
+|---|---|---|
+| `NODE_AGENT_PLANNER_MODE` | Planner mode: `template`, `openai`, `endpoint` | `template` |
+| `NODE_AGENT_PLANNER_AUTH_TOKEN` | API key for LLM provider | (none) |
+| `NODE_AGENT_PLANNER_MODEL` | Model name | `gpt-4o-mini` |
+| `NODE_AGENT_PLANNER_ENDPOINT_URL` | LLM endpoint URL | OpenAI default |
+| `NODE_AGENT_PLANNER_TIMEOUT` | Planner request timeout | `30s` |
+| `NODE_AGENT_PLANNER_MAX_ELEMENTS` | Max DOM elements sent to planner | `50` |
+| `NODE_AGENT_TRACE_SCREENSHOTS` | Enable per-step trace screenshots | `false` |
+
+---
+
+## Security and Sandboxing
+
+Each browser node runs inside a hardened Docker container:
+
+- **Non-root process**: The node-agent and Chrome run as an unprivileged user.
+- **Read-only root filesystem**: Container filesystem is read-only. Writable paths (Chrome profile, tmp, screenshots) are mounted as tmpfs.
+- **Dropped capabilities**: All Linux capabilities are dropped. `no-new-privileges` is enforced.
+- **Resource limits**: CPU, memory, and PID limits are set per container to prevent runaway processes.
+- **No exposed debug ports**: Chrome's remote debugging port is never published to the host network.
+- **Egress policy enforcement**: Container-level network policies restrict outbound traffic.
+
+---
+
+## Challenges and Anti-Bot Detection
+
+### The Problem
+
+Many websites deploy anti-bot systems (Cloudflare, Akamai, PerimeterX, DataDome) that detect and block automated browser access. When this happens, Browser-use records the task as `blocked (bot_blocked)` with the reason `target denied automated access`.
+
+These systems detect automation through multiple signals:
+
+| Detection Vector | What They Check |
+|---|---|
+| WebDriver flag | `navigator.webdriver === true` (set by Chromium when driven via CDP/WebDriver) |
+| User-Agent string | Headless Chrome includes `HeadlessChrome` in the UA |
+| CDP detection | JavaScript fingerprints detect the DevTools Protocol connection |
+| Canvas/WebGL fingerprint | Automated browsers produce distinct rendering fingerprints |
+| TLS fingerprint (JA3/JA4) | The TLS handshake signature differs between headless and regular Chrome |
+| Behavioral analysis | Bots exhibit zero mouse movement, instant clicks, no scroll inertia |
+| IP reputation | Datacenter IP ranges are flagged; residential IPs are trusted |
+
+### Current Mitigations
+
+- **Blocker detection**: The node-agent detects captcha pages, human verification challenges, and bot-block interstitials. It classifies them as structured blocker metadata (`blocker_type`, `blocker_message`) rather than retrying blindly.
+- **Transient interstitial handling**: For likely transient blocks (e.g., Cloudflare "checking your browser" pages), the agent performs a short re-check before classifying the task as blocked.
+- **Per-domain cooldowns**: After a `bot_blocked` or `human_verification_required` event, the runner applies a configurable cooldown on that domain to avoid hammering a site that is actively blocking.
+- **Full Chromium runtime**: Browser-use runs `google-chrome-stable` with a virtual display (Xvfb), not headless mode. This produces standard rendering fingerprints.
+
+### Planned Anti-Detection Improvements
+
+These are planned improvements to reduce detection rates on protected sites:
+
+1. **Stealth patches**: Inject JavaScript at page load to override `navigator.webdriver`, spoof `navigator.plugins`, `navigator.languages`, and WebGL vendor strings. Similar to `puppeteer-extra-plugin-stealth`.
+2. **Chrome launch flag hardening**: Add `--disable-blink-features=AutomationControlled` and related flags to suppress automation indicators at the browser level.
+3. **Human-like interaction modeling**: Introduce randomized delays (50-300ms jitter) between actions, synthetic mouse movement paths with Bezier curves, and natural scroll velocity profiles.
+4. **Persistent browser profiles**: Use persistent user data directories with cookies, local storage, and browsing history to mimic a returning user rather than a fresh session.
+5. **TLS fingerprint alignment**: Investigate `curl-impersonate` or custom Chromium builds to match the TLS handshake of standard Chrome releases.
+6. **Proxy integration**: Support for residential proxy rotation to avoid IP-reputation-based blocking.
+7. **Captcha solving integration**: Optional integration with captcha solving services (2Captcha, hCaptcha solver) or vision-model-based solving for challenge pages.
+
+---
+
+## Roadmap
+
+- [ ] Stealth mode (anti-detection patches, launch flag hardening)
+- [ ] Human-like interaction modeling (jitter, mouse paths, scroll dynamics)
+- [ ] Persistent browser profiles
+- [ ] Proxy rotation support
+- [ ] Captcha solving integration
+- [ ] Multi-step agentic planning (planner observes results and re-plans)
+- [ ] Parallel task execution across node pool
+- [ ] Webhook notifications on task completion
+- [ ] S3/GCS artifact storage (replace local filesystem)
+- [ ] Kubernetes deployment manifests
+
+---
+
+## Development Commands
 
 ```bash
-make up              # build + start local stack
-make down            # stop stack
-make logs            # stream compose logs
-make ps              # list compose services
-make health          # wait for orchestrator readiness
-make test            # run go tests
-make fmt             # gofmt all go files
-make proto           # generate go protobuf stubs
-make run-orchestrator
-make infra-up        # start only redis+postgres for host-run orchestrator
-make run-orchestrator-pool
-make dev-pool        # infra + browser image + host-run orchestrator with warm pool
-make clean-pool-nodes
-make soak-local      # enqueue/poll many tasks and print reliability summary
-make planner-eval    # run fixture-driven planner regression checks
-make ui-dev          # run separated TypeScript dashboard (Vite)
-make ui-build        # build separated TypeScript dashboard
+make up                  # Build and start local stack
+make down                # Stop stack
+make logs                # Stream compose logs
+make ps                  # List compose services
+make health              # Wait for orchestrator readiness
+make test                # Run Go tests
+make fmt                 # Format all Go files
+make proto               # Generate Go protobuf stubs
+make run-orchestrator    # Run orchestrator on host
+make infra-up            # Start only Redis + PostgreSQL
+make run-orchestrator-pool  # Run orchestrator with warm pool
+make dev-pool            # Full local warm-pool development mode
+make clean-pool-nodes    # Remove pool-managed containers
+make soak-local          # Soak test: enqueue many tasks, print reliability summary
+make planner-eval        # Run fixture-driven planner regression checks
+make ui-dev              # Run dashboard frontend (Vite dev server)
+make ui-build            # Build dashboard frontend for production
 ```
+
+---
+
+## Project Structure
+
+```
+browser-use/
+  cmd/
+    node-agent/          # Browser node-agent binary (CDP driver, planner, gRPC server)
+    orchestrator/        # Orchestrator HTTP/gRPC server
+  internal/
+    api/                 # HTTP handlers, routes, middleware
+    gen/                 # Generated protobuf Go stubs
+    idempotency/         # Idempotency key store (memory + Redis)
+    lease/               # Distributed lease manager (memory + Redis)
+    model/               # Domain types (Task, Session, Node)
+    pool/                # Warm-pool manager + local Docker provider
+    queue/               # Task queue (Redis-backed)
+    runner/              # Task execution loop, retry logic
+    store/               # PostgreSQL persistence layer
+  proto/                 # Protobuf definitions (node.proto)
+  deploy/compose/        # Docker Compose config, .env
+  docker/                # Dockerfiles (orchestrator, browser-node)
+  web/                   # Dashboard frontend (React + TypeScript)
+  scripts/               # Helper scripts (soak test)
+```
+
+---
 
 ## Notes
-- Sessions and task state are persisted in Postgres.
-- Queued tasks are reconciled from Postgres on runner startup/restart.
-- Task responses prefer `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
-- Task status payload includes `attempt`, `max_retries`, and `next_retry_at` for retry visibility.
-- Task status payload now also includes `trace` for step-by-step execution visibility.
-- Task status payload includes `extracted_outputs` derived from successful `extract_text` steps.
-- Supported deterministic action types include `wait_for`, `click`, `type`, `extract_text`, `scroll`, `wait`, `press_enter`, and `wait_for_url_contains`.
-- Planner mode defaults to `template`; set `NODE_AGENT_PLANNER_MODE=endpoint` to call an external planner API using compact page state, or `NODE_AGENT_PLANNER_MODE=openai` to use direct model-backed planning.
-- `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
-- `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.
-- `POST /v1/tasks` and `POST /v1/tasks/{id}/replay` include `X-Trace-Id: trc_<task_id>` in responses for log correlation across orchestrator, runner, and node-agent.
-- `Idempotency-Key` header is supported on `POST /v1/sessions`, `POST /v1/tasks`, and `POST /v1/tasks/{id}/replay`.
-- Optional API safety controls:
-  - `ORCHESTRATOR_API_KEY=<secret>` enforces API key auth on create/replay routes (`POST /sessions`, `POST /v1/sessions`, `POST /task`, `POST /v1/tasks`, `POST /v1/tasks/{id}/replay`).
-  - Send key via `X-API-Key` (or `Authorization: Bearer <secret>`).
-  - `ORCHESTRATOR_RATE_LIMIT_PER_MINUTE=<N>` enables per-client fixed-window rate limiting on those same write routes (including replay).
-- Node-agent now detects blocker pages (captcha/human verification/form validation), returns structured blocker metadata, and runner persists blocker evidence on failed tasks without retry loops.
-- Node-agent now performs a short blocker re-check for likely transient anti-bot interstitials (for example Cloudflare "checking your browser") before classifying a task as blocked.
-- Planner fallback behavior is now explicitly logged (planner mode, fallback planner, cause, and action count) for easier debugging of endpoint/OpenAI planner failures.
-- Planner quality regression checks are available via fixture-driven eval tests (`make planner-eval`).
-- Runner applies per-domain cooldowns after challenge blockers (`human_verification_required` / `bot_blocked`) to fail subsequent tasks fast until cooldown expires.
-- Task create and replay flows now validate provided `session_id` values against the session store and reject unknown sessions.
-- Warm-pool manager is currently feature-flagged and intended for host-run orchestrator mode (`make run-orchestrator`) where `docker` CLI is available; compose mode keeps static node service by default.
-- Optional dashboard dist override: set `ORCHESTRATOR_DASHBOARD_DIST=/absolute/path/to/web/dist` to force serving a specific built frontend bundle.
+
+- Sessions and task state are persisted in PostgreSQL. Queued tasks are reconciled from the database on runner startup.
+- Task responses include `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
+- Task status payloads include `attempt`, `max_retries`, `next_retry_at`, `trace`, and `extracted_outputs`.
+- The `POST /task` convenience endpoint waits for task completion by default. Use `POST /v1/tasks` for async queuing.
+- `X-Trace-Id: trc_<task_id>` is returned in task creation responses for log correlation.
+- API key authentication is optional. Set `ORCHESTRATOR_API_KEY` and send via `X-API-Key` or `Authorization: Bearer <key>`.
+- Rate limiting is optional. Set `ORCHESTRATOR_RATE_LIMIT_PER_MINUTE` for per-client fixed-window limiting on write routes.
+- Warm-pool manager is feature-flagged for host-run orchestrator mode where `docker` CLI is available. Compose mode uses a static node service by default.
