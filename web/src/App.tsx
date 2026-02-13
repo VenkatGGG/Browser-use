@@ -61,13 +61,86 @@ function compact(value: string | undefined, max: number): string {
   return `${text.slice(0, max - 3)}...`;
 }
 
+const ACTION_ICONS: Record<string, string> = {
+  scroll: "⬇",
+  click: "🖱",
+  type: "⌨",
+  wait: "⏱",
+  wait_for: "👁",
+  extract_text: "📋",
+  press_enter: "⏎",
+  submit_search: "🔍",
+  wait_for_url_contains: "🔗",
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  scroll: "Scroll",
+  click: "Click",
+  type: "Type",
+  wait: "Wait",
+  wait_for: "Wait for element",
+  extract_text: "Extract text",
+  press_enter: "Press Enter",
+  submit_search: "Submit search",
+  wait_for_url_contains: "Wait for URL",
+};
+
+function stepIcon(type: string): string {
+  return ACTION_ICONS[type] || "⚡";
+}
+
+function stepLabel(type: string): string {
+  return ACTION_LABELS[type] || type;
+}
+
 function stepSummary(step: TaskTraceStep): string {
   const action = step.action;
-  if (!action) return "unknown action";
+  if (!action) return "Unknown action";
   const type = String(action.type || "unknown");
-  if (action.selector) return `${type} ${action.selector}`;
-  if (action.text) return `${type} "${compact(action.text, 42)}"`;
-  return type;
+  const icon = stepIcon(type);
+  const label = stepLabel(type);
+
+  switch (type) {
+    case "scroll": {
+      const dir = action.text || "down";
+      const px = action.pixels ? `${action.pixels}px` : "";
+      return `${icon} ${label} ${dir}${px ? ` ${px}` : ""}`;
+    }
+    case "click":
+      return `${icon} ${label} on ${compact(action.selector || "element", 50)}`;
+    case "type":
+      return `${icon} ${label} "${compact(action.text || "", 30)}" into ${compact(action.selector || "input", 30)}`;
+    case "wait":
+      return `${icon} ${label} ${action.delay_ms || 0}ms`;
+    case "wait_for":
+      return `${icon} ${label} ${compact(action.selector || "", 50)}`;
+    case "extract_text":
+      return `${icon} ${label} from ${compact(action.selector || "", 50)}`;
+    case "press_enter":
+      return `${icon} ${label} on ${compact(action.selector || "input", 50)}`;
+    case "wait_for_url_contains":
+      return `${icon} ${label} "${compact(action.text || "", 40)}"`;
+    default:
+      if (action.selector) return `${icon} ${type} ${compact(action.selector, 42)}`;
+      if (action.text) return `${icon} ${type} "${compact(action.text, 42)}"`;
+      return `${icon} ${type}`;
+  }
+}
+
+function statusIcon(status: string): string {
+  switch (status) {
+    case "succeeded": return "✅";
+    case "failed": return "❌";
+    case "running": return "⏳";
+    case "skipped": return "⏭";
+    default: return "◻️";
+  }
+}
+
+function durationLabel(ms: number | undefined): string {
+  if (ms == null) return "-";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 export function App() {
@@ -82,6 +155,16 @@ export function App() {
   const [taskActionsJSON, setTaskActionsJSON] = useState("");
   const [composeStatus, setComposeStatus] = useState("No task submitted yet.");
   const [previewImageURL, setPreviewImageURL] = useState("");
+  const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
+
+  function toggleStep(idx: number) {
+    setExpandedSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  }
 
   const nodesQuery = useQuery({
     queryKey: ["nodes"],
@@ -561,30 +644,70 @@ export function App() {
               <div className="tracePane">
                 <h3>Execution Trace</h3>
                 {selectedTask.trace && selectedTask.trace.length ? (
-                  <ul className="traceList">
-                    {selectedTask.trace.map((step, idx) => (
-                      <li key={`${selectedTask.id}-step-${idx}`} className="traceStep">
-                        <div className="traceTop">
-                          <span>
-                            #{step.index || idx + 1} - {stepSummary(step)}
-                          </span>
-                          <span className={`pill ${statusClass(String(step.status || "unknown"))}`}>{step.status || "unknown"}</span>
-                        </div>
-                        {step.output_text ? <div>output: {compact(step.output_text, 200)}</div> : null}
-                        {step.error ? <div className="traceError">error: {compact(step.error, 200)}</div> : null}
-                        <div className="traceTime">
-                          start: {fmt(step.started_at)} | end: {fmt(step.completed_at)} | duration: {step.duration_ms ?? 0}ms
-                        </div>
-                        {step.screenshot_artifact_url ? (
-                          <button type="button" onClick={() => setPreviewImageURL(step.screenshot_artifact_url || "")}>
-                            screenshot
-                          </button>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
+                  <>
+                    {/* Progress bar */}
+                    <div className="traceProgress">
+                      {selectedTask.trace.map((step, idx) => {
+                        const s = String(step.status || "unknown");
+                        return <div key={idx} className={`traceProgressSegment ${s === "succeeded" ? "segmentSuccess" : s === "failed" ? "segmentFail" : "segmentOther"}`} title={`Step ${step.index || idx + 1}: ${s}`} />;
+                      })}
+                    </div>
+                    <div className="traceStats">
+                      <span>{selectedTask.trace.filter(s => s.status === "succeeded").length}/{selectedTask.trace.length} succeeded</span>
+                      <span>Total: {durationLabel(selectedTask.trace.reduce((sum, s) => sum + (s.duration_ms || 0), 0))}</span>
+                    </div>
+                    <ul className="traceList">
+                      {selectedTask.trace.map((step, idx) => {
+                        const isExpanded = expandedSteps.has(idx);
+                        const s = String(step.status || "unknown");
+                        const action = step.action;
+                        return (
+                          <li key={`${selectedTask.id}-step-${idx}`}
+                            className={`traceStep ${s === "succeeded" ? "traceStepSuccess" : s === "failed" ? "traceStepFail" : "traceStepOther"}`}>
+                            <div className="traceTop" onClick={() => toggleStep(idx)} role="button" tabIndex={0}>
+                              <span className="traceStepHeader">
+                                <span className="traceStepNumber">#{step.index || idx + 1}</span>
+                                <span className="traceStatusIcon">{statusIcon(s)}</span>
+                                <span className="traceStepLabel">{stepSummary(step)}</span>
+                              </span>
+                              <span className="traceStepMeta">
+                                <span className="traceDuration">{durationLabel(step.duration_ms)}</span>
+                                <span className="traceChevron">{isExpanded ? "▼" : "▶"}</span>
+                              </span>
+                            </div>
+                            {/* Detail badges — always visible */}
+                            {action && (
+                              <div className="traceBadges">
+                                {action.pixels ? <code className="traceBadge">pixels: {action.pixels}</code> : null}
+                                {action.delay_ms ? <code className="traceBadge">delay: {action.delay_ms}ms</code> : null}
+                                {action.timeout_ms ? <code className="traceBadge">timeout: {action.timeout_ms}ms</code> : null}
+                                {action.selector ? <code className="traceBadge selectorBadge" title={action.selector}>{compact(action.selector, 40)}</code> : null}
+                              </div>
+                            )}
+                            {/* Expanded detail */}
+                            {isExpanded && (
+                              <div className="traceDetail">
+                                {step.output_text ? <div className="traceOutput"><strong>Output:</strong> {compact(step.output_text, 300)}</div> : null}
+                                {step.error ? <div className="traceError"><strong>Error:</strong> {compact(step.error, 300)}</div> : null}
+                                <div className="traceTime">
+                                  <span>Start: {fmt(step.started_at)}</span>
+                                  <span>End: {fmt(step.completed_at)}</span>
+                                  <span>Duration: {durationLabel(step.duration_ms)}</span>
+                                </div>
+                                {step.screenshot_artifact_url ? (
+                                  <button type="button" className="traceScreenshotBtn" onClick={() => window.open(step.screenshot_artifact_url || "", "_blank")}>
+                                    📸 View Screenshot
+                                  </button>
+                                ) : null}
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </>
                 ) : (
-                  <p>No trace available.</p>
+                  <p className="traceEmpty">No trace steps recorded.</p>
                 )}
               </div>
             </>

@@ -63,7 +63,7 @@ body {
   margin-bottom: 10px;
 }
 
-.kpis > div {
+.kpis>div {
   border: 1px solid #d6ccc0;
   border-radius: 8px;
   background: #fff;
@@ -242,18 +242,22 @@ body {
   background: #f3ead6;
   color: #8a5e08;
 }
+
 .pill.running {
   background: #d9ecff;
   color: #0b5886;
 }
+
 .pill.completed {
   background: #daf4e5;
   color: #1f794d;
 }
+
 .pill.failed {
   background: #f8ddd7;
   color: #9b321a;
 }
+
 .pill.canceled {
   background: #e9edf1;
   color: #52606a;
@@ -295,48 +299,262 @@ body {
   line-height: 1.4;
 }
 
+/* ── Trace Pane ─────────────────────────────────── */
 .tracePane {
-  margin-top: 10px;
+  margin-top: 14px;
   border-top: 1px solid #ece3d9;
-  padding-top: 10px;
+  padding-top: 12px;
 }
 
 .tracePane h3 {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-size: 13px;
+  font-weight: 700;
+  color: #1a2a32;
 }
 
+/* Progress bar */
+.traceProgress {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 6px;
+  background: #e8e0d6;
+}
+
+.traceProgressSegment {
+  flex: 1;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.segmentSuccess {
+  background: #34a853;
+}
+
+.segmentFail {
+  background: #d93025;
+}
+
+.segmentOther {
+  background: #bdc3c7;
+}
+
+.traceStats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #5f6d75;
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+/* Step list */
 .traceList {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
+/* Step cards */
 .traceStep {
-  border: 1px solid #ece3d9;
+  border: 1px solid #e0d8ce;
+  border-left: 4px solid #bdc3c7;
   border-radius: 8px;
-  padding: 8px;
-  font-size: 11px;
+  padding: 8px 10px;
+  font-size: 12px;
   background: #faf6ef;
+  transition: box-shadow 0.15s, border-color 0.15s;
 }
 
+.traceStep:hover {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.traceStepSuccess {
+  border-left-color: #34a853;
+}
+
+.traceStepFail {
+  border-left-color: #d93025;
+  background: #fdf2f0;
+}
+
+.traceStepOther {
+  border-left-color: #f9a825;
+}
+
+/* Step header (clickable) */
 .traceTop {
   display: flex;
   justify-content: space-between;
-  gap: 6px;
   align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.traceTop:focus {
+  outline: 2px solid #4a90d9;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.traceStepHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.traceStepNumber {
+  font-weight: 700;
+  color: #3d5a6e;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.traceStatusIcon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.traceStepLabel {
+  font-weight: 500;
+  color: #1a2a32;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.traceStepMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.traceDuration {
+  font-size: 10px;
+  color: #5f6d75;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.traceChevron {
+  font-size: 9px;
+  color: #8b9aa5;
+  transition: transform 0.15s;
+}
+
+/* Detail badges */
+.traceBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.traceBadge {
+  display: inline-block;
+  font-size: 10px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  background: #eee8df;
+  color: #3d5a6e;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #d8cfbf;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selectorBadge {
+  background: #e8eef4;
+  border-color: #c4d4e2;
+  color: #2a4a6a;
+}
+
+/* Expanded detail section */
+.traceDetail {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #dcd4c8;
+  animation: traceSlideIn 0.15s ease-out;
+}
+
+@keyframes traceSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.traceOutput {
+  font-size: 11px;
+  color: #1a6e3a;
+  background: #eef7f0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  word-break: break-word;
 }
 
 .traceError {
+  font-size: 11px;
   color: #9b321a;
-  margin-top: 4px;
+  background: #fdf2f0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  word-break: break-word;
 }
 
 .traceTime {
-  color: #4d5c64;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 10px;
+  color: #5f6d75;
   margin-top: 4px;
+}
+
+.traceTime span {
+  white-space: nowrap;
+}
+
+.traceScreenshotBtn {
+  margin-top: 6px;
+  border: 1px solid #c4d4e2;
+  border-radius: 6px;
+  background: #fff;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  color: #2a556a;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.traceScreenshotBtn:hover {
+  background: #e8eef4;
+}
+
+.traceEmpty {
+  font-size: 12px;
+  color: #8b9aa5;
+  font-style: italic;
 }
 
 .traceStep a,
@@ -435,4 +653,3 @@ body {
   height: auto;
   border-radius: 8px;
 }
-
