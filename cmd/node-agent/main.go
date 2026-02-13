@@ -9,8 +9,8 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/netip"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
@@ -69,13 +69,35 @@ type executeRequest struct {
 	Actions []executeAction `json:"actions,omitempty"`
 }
 
+// FlexInt unmarshals both JSON numbers and quoted-number strings (e.g. 5000 or "5000").
+// LLMs frequently emit numeric values as strings.
+type FlexInt int
+
+func (f *FlexInt) UnmarshalJSON(b []byte) error {
+	var n int
+	if err := json.Unmarshal(b, &n); err == nil {
+		*f = FlexInt(n)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		parsed, parseErr := strconv.Atoi(strings.TrimSpace(s))
+		if parseErr != nil {
+			return fmt.Errorf("FlexInt: cannot parse %q as int: %w", s, parseErr)
+		}
+		*f = FlexInt(parsed)
+		return nil
+	}
+	return fmt.Errorf("FlexInt: unsupported value %s", string(b))
+}
+
 type executeAction struct {
-	Type      string `json:"type"`
-	Selector  string `json:"selector,omitempty"`
-	Text      string `json:"text,omitempty"`
-	Pixels    int    `json:"pixels,omitempty"`
-	TimeoutMS int    `json:"timeout_ms,omitempty"`
-	DelayMS   int    `json:"delay_ms,omitempty"`
+	Type      string  `json:"type"`
+	Selector  string  `json:"selector,omitempty"`
+	Text      string  `json:"text,omitempty"`
+	Pixels    FlexInt `json:"pixels,omitempty"`
+	TimeoutMS FlexInt `json:"timeout_ms,omitempty"`
+	DelayMS   FlexInt `json:"delay_ms,omitempty"`
 }
 
 type executeResponse struct {
@@ -284,13 +306,13 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 				step.Error = policyErr.Error()
 				trace = append(trace, step)
 				return executeResponse{
-					Trace: append([]executeTraceStep(nil), trace...),
-				}, &executeFlowError{
-					message: fmt.Sprintf("action %d (%s) failed: %v", index+1, action.Type, policyErr),
-					result: executeResponse{
 						Trace: append([]executeTraceStep(nil), trace...),
-					},
-				}
+					}, &executeFlowError{
+						message: fmt.Sprintf("action %d (%s) failed: %v", index+1, action.Type, policyErr),
+						result: executeResponse{
+							Trace: append([]executeTraceStep(nil), trace...),
+						},
+					}
 			}
 		}
 		if e.traceScreenshots {
@@ -401,7 +423,7 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		return "", errors.New("action type is required")
 	}
 
-	timeout := actionTimeout(action.TimeoutMS)
+	timeout := actionTimeout(int(action.TimeoutMS))
 	actionCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -437,7 +459,7 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 				return "", err
 			}
 		}
-		if delay := boundedActionDelay(action.DelayMS, 0); delay > 0 {
+		if delay := boundedActionDelay(int(action.DelayMS), 0); delay > 0 {
 			select {
 			case <-actionCtx.Done():
 				return "", actionCtx.Err()
@@ -450,10 +472,10 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		if direction == "" {
 			direction = "down"
 		}
-		if err := client.Scroll(actionCtx, direction, action.Pixels); err != nil {
+		if err := client.Scroll(actionCtx, direction, int(action.Pixels)); err != nil {
 			return "", err
 		}
-		if delay := boundedActionDelay(action.DelayMS, 0); delay > 0 {
+		if delay := boundedActionDelay(int(action.DelayMS), 0); delay > 0 {
 			select {
 			case <-actionCtx.Done():
 				return "", actionCtx.Err()
@@ -504,7 +526,7 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		}
 		return "", errors.New("extract_text failed: " + strings.Join(attemptErrors, " | "))
 	case "wait":
-		delay := boundedActionDelay(action.DelayMS, 500*time.Millisecond)
+		delay := boundedActionDelay(int(action.DelayMS), 500*time.Millisecond)
 		select {
 		case <-actionCtx.Done():
 			return "", actionCtx.Err()

@@ -137,21 +137,21 @@ func toExecuteAction(actionType string, params map[string]string) (executeAction
 		if err != nil {
 			return executeAction{}, status.Errorf(codes.InvalidArgument, "invalid timeout_ms: %s", timeoutRaw)
 		}
-		action.TimeoutMS = timeout
+		action.TimeoutMS = FlexInt(timeout)
 	}
 	if delayRaw := strings.TrimSpace(params["delay_ms"]); delayRaw != "" {
 		delay, err := strconv.Atoi(delayRaw)
 		if err != nil {
 			return executeAction{}, status.Errorf(codes.InvalidArgument, "invalid delay_ms: %s", delayRaw)
 		}
-		action.DelayMS = delay
+		action.DelayMS = FlexInt(delay)
 	}
 	if pixelsRaw := strings.TrimSpace(params["pixels"]); pixelsRaw != "" {
 		pixels, err := strconv.Atoi(pixelsRaw)
 		if err != nil {
 			return executeAction{}, status.Errorf(codes.InvalidArgument, "invalid pixels: %s", pixelsRaw)
 		}
-		action.Pixels = pixels
+		action.Pixels = FlexInt(pixels)
 	}
 
 	return action, nil

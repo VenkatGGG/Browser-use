@@ -289,10 +289,19 @@ func (p *openAIPlanner) Plan(ctx context.Context, goal string, snapshot pageSnap
 		Messages: []openAIChatMessage{
 			{
 				Role: "system",
-				Content: "You are a browser automation planner. Return ONLY JSON with shape " +
-					`{"actions":[{"type":"...","selector":"...","text":"...","timeout_ms":0,"delay_ms":0,"pixels":0}]}. ` +
-					"Only use allowed action types: wait_for, click, type, scroll, extract_text, wait, press_enter, submit_search, wait_for_url_contains. " +
-					"Do not include explanations.",
+				Content: "You are a browser automation planner. Return ONLY valid JSON with this shape:\n" +
+					"{\"actions\":[{\"type\":\"...\",\"selector\":\"...\",\"text\":\"...\",\"timeout_ms\":0,\"delay_ms\":0,\"pixels\":0}]}\n\n" +
+					"Available action types and their required fields:\n" +
+					"- wait_for: wait for element. Fields: selector (string, required), timeout_ms (int, optional, default 8000)\n" +
+					"- click: click element. Fields: selector (string, required)\n" +
+					"- type: type text into input. Fields: selector (string, required), text (string, required)\n" +
+					"- press_enter: press enter on element. Fields: selector (string, required)\n" +
+					"- scroll: scroll the page. Fields: text (string: \"down\" or \"up\"), pixels (int: number of pixels, e.g. 3000)\n" +
+					"- wait: pause. Fields: delay_ms (int: milliseconds, e.g. 1000)\n" +
+					"- extract_text: get text from element. Fields: selector (string, required)\n" +
+					"- wait_for_url_contains: wait for URL change. Fields: text (string: substring to match), timeout_ms (int)\n\n" +
+					"IMPORTANT: pixels, timeout_ms, and delay_ms must be integers, NOT strings. " +
+					"Do not include explanations. Return ONLY JSON.",
 			},
 			{
 				Role:    "user",
