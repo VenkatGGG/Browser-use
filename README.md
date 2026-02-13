@@ -35,57 +35,70 @@ The system consists of three main components:
 
 Tasks flow through the system as follows:
 
-```
-User Goal (natural language)
-    |
-    v
-Orchestrator (HTTP API)
-    |-- enqueue task in PostgreSQL
-    |-- lease a ready browser-node
-    |-- dispatch via gRPC
-    v
-Node-Agent (inside container)
-    |-- launch Chromium + navigate to URL
-    |-- if no actions provided: call AI Planner
-    |   |-- snapshot DOM state
-    |   |-- send to LLM (Gemini / OpenAI)
-    |   |-- receive typed action plan
-    |-- execute CDP action chain
-    |   |-- wait_for, click, type, scroll, extract_text, press_enter, wait
-    |-- capture screenshot artifact
-    |-- report trace + result back to orchestrator
-    v
-Orchestrator
-    |-- persist result, trace, screenshot URL
-    |-- release node lease
-    |-- retry on transient failure (exponential backoff)
+```mermaid
+flowchart TD
+    A["User submits goal (natural language)"] --> B["Orchestrator"]
+    B --> C["Enqueue task in PostgreSQL"]
+    C --> D["Lease a ready browser-node"]
+    D --> E["Dispatch via gRPC"]
+    E --> F["Node-Agent"]
+    F --> G["Launch Chromium + navigate to URL"]
+    G --> H{"Actions provided?"}
+    H -- Yes --> J["Execute CDP action chain"]
+    H -- No --> I["AI Planner"]
+    I --> I1["Snapshot DOM state"]
+    I1 --> I2["Send to LLM (Gemini / OpenAI)"]
+    I2 --> I3["Receive typed action plan"]
+    I3 --> J
+    J --> K["Capture screenshot artifact"]
+    K --> L["Report trace + result to orchestrator"]
+    L --> M["Persist result, trace, screenshot URL"]
+    M --> N["Release node lease"]
+    N --> O{"Transient failure?"}
+    O -- Yes --> P["Retry with exponential backoff"]
+    P --> D
+    O -- No --> Q["Task complete"]
 ```
 
 ---
 
 ## Architecture
 
-```
-                              +-------------------+
-                              |   PostgreSQL      |
-                              |   (state store)   |
-                              +--------+----------+
-                                       |
-+-------------+              +---------+---------+              +------------------+
-|  Dashboard  |  <--HTTP-->  |   Orchestrator    |  <--gRPC-->  |  Browser Node 1  |
-|  (React)    |              |   (Go, port 8080) |              |  - Chromium      |
-+-------------+              |                   |              |  - Xvfb          |
-                             |  - Task queue     |              |  - node-agent    |
-                             |  - Session mgmt   |              +------------------+
-                             |  - Node registry  |
-                             |  - Lease manager   |              +------------------+
-                             |  - Retry engine   |  <--gRPC-->  |  Browser Node N  |
-                             +--------+----------+              |  - Chromium      |
-                                      |                         |  - Xvfb          |
-                              +-------+-------+                 |  - node-agent    |
-                              |    Redis      |                 +------------------+
-                              |  (queue, locks)|
-                              +---------------+
+```mermaid
+flowchart LR
+    subgraph Client
+        DASH["Dashboard (React)"]
+    end
+
+    subgraph Orchestrator
+        ORC["Orchestrator (Go, :8080)"]
+        ORC --- TQ["Task Queue"]
+        ORC --- SM["Session Mgmt"]
+        ORC --- NR["Node Registry"]
+        ORC --- LM["Lease Manager"]
+        ORC --- RE["Retry Engine"]
+    end
+
+    subgraph Data
+        PG[("PostgreSQL")]
+        RD[("Redis")]
+    end
+
+    subgraph Sandbox 1
+        NA1["node-agent"] --> CR1["Chromium"]
+        CR1 --> XV1["Xvfb"]
+    end
+
+    subgraph Sandbox N
+        NAN["node-agent"] --> CRN["Chromium"]
+        CRN --> XVN["Xvfb"]
+    end
+
+    DASH <-->|HTTP| ORC
+    ORC <-->|gRPC| NA1
+    ORC <-->|gRPC| NAN
+    ORC --> PG
+    ORC --> RD
 ```
 
 ### Key Design Decisions
