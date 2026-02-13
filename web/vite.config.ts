@@ -15,7 +15,8 @@ export default defineConfig({
       "/task": "http://localhost:8080",
       "/tasks": "http://localhost:8080",
       "/metrics": "http://localhost:8080",
-      "/healthz": "http://localhost:8080"
+      "/healthz": "http://localhost:8080",
+      "/artifacts": "http://localhost:8080"
     }
   }
 });

@@ -478,6 +478,16 @@ export function App() {
                       >
                         Replay
                       </button>
+                      {task.screenshot_artifact_url ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window.open(task.screenshot_artifact_url!, "_blank");
+                          }}
+                        >
+                          Screenshot
+                        </button>
+                      ) : null}
                       {isCancelable(task) ? (
                         <button
                           className="danger"
@@ -537,6 +547,11 @@ export function App() {
               <div className="actions">
                 <button onClick={() => replayMutation.mutate({ id: selectedTask.id, fresh: false })}>Replay</button>
                 <button onClick={() => replayMutation.mutate({ id: selectedTask.id, fresh: true })}>Replay Fresh</button>
+                {selectedTask.screenshot_artifact_url ? (
+                  <button onClick={() => window.open(selectedTask.screenshot_artifact_url!, "_blank")}>
+                    View Screenshot
+                  </button>
+                ) : null}
                 {isCancelable(selectedTask) ? (
                   <button className="danger" onClick={() => cancelMutation.mutate(selectedTask.id)}>
                     Cancel
