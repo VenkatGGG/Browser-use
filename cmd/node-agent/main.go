@@ -59,6 +59,7 @@ type heartbeatNodeRequest struct {
 
 type executeRequest struct {
 	TaskID  string          `json:"task_id"`
+	TraceID string          `json:"trace_id,omitempty"`
 	URL     string          `json:"url"`
 	Goal    string          `json:"goal"`
 	Actions []executeAction `json:"actions,omitempty"`
@@ -131,7 +132,7 @@ func newBrowserExecutor(cfg config) *browserExecutor {
 }
 
 func (e *browserExecutor) Execute(ctx context.Context, targetURL string) (executeResponse, error) {
-	return e.ExecuteWithActions(ctx, targetURL, "", nil)
+	return e.ExecuteWithActions(ctx, targetURL, "", nil, "")
 }
 
 func (e *browserExecutor) dialWithRetry(ctx context.Context) (*cdp.Client, error) {
@@ -152,10 +153,14 @@ func (e *browserExecutor) dialWithRetry(ctx context.Context) (*cdp.Client, error
 	return nil, fmt.Errorf("dial cdp after retries: %w", lastErr)
 }
 
-func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goal string, actions []executeAction) (executeResponse, error) {
+func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goal string, actions []executeAction, traceID string) (executeResponse, error) {
 	url := strings.TrimSpace(targetURL)
 	if url == "" {
 		return executeResponse{}, errors.New("url is required")
+	}
+	traceID = strings.TrimSpace(traceID)
+	if traceID != "" {
+		log.Printf("trace_id=%s node execution started task_url=%q", traceID, url)
 	}
 
 	e.mu.Lock()
@@ -193,14 +198,26 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 	if len(executionActions) == 0 && strings.TrimSpace(goal) != "" && e.planner != nil {
 		snapshot, err := capturePageSnapshot(runCtx, client)
 		if err != nil {
-			log.Printf("goal planning skipped (snapshot failed): task goal=%q err=%v", goal, err)
+			if traceID != "" {
+				log.Printf("trace_id=%s goal planning skipped (snapshot failed): goal=%q err=%v", traceID, goal, err)
+			} else {
+				log.Printf("goal planning skipped (snapshot failed): task goal=%q err=%v", goal, err)
+			}
 		} else {
 			planned, err := e.planner.Plan(runCtx, goal, snapshot)
 			if err != nil {
-				log.Printf("goal planning skipped (planner failed): planner=%s goal=%q err=%v", e.planner.Name(), goal, err)
+				if traceID != "" {
+					log.Printf("trace_id=%s goal planning skipped (planner failed): planner=%s goal=%q err=%v", traceID, e.planner.Name(), goal, err)
+				} else {
+					log.Printf("goal planning skipped (planner failed): planner=%s goal=%q err=%v", e.planner.Name(), goal, err)
+				}
 			} else if len(planned) > 0 {
 				executionActions = planned
-				log.Printf("planner=%s generated %d actions for goal=%q actions=%s", e.planner.Name(), len(planned), goal, summarizeActions(planned))
+				if traceID != "" {
+					log.Printf("trace_id=%s planner=%s generated %d actions for goal=%q actions=%s", traceID, e.planner.Name(), len(planned), goal, summarizeActions(planned))
+				} else {
+					log.Printf("planner=%s generated %d actions for goal=%q actions=%s", e.planner.Name(), len(planned), goal, summarizeActions(planned))
+				}
 			}
 		}
 	}
@@ -787,7 +804,7 @@ func routes(executor *browserExecutor) http.Handler {
 			return
 		}
 
-		result, err := executor.ExecuteWithActions(r.Context(), req.URL, req.Goal, req.Actions)
+		result, err := executor.ExecuteWithActions(r.Context(), req.URL, req.Goal, req.Actions, req.TraceID)
 		if err != nil {
 			httpx.WriteError(w, http.StatusBadGateway, "execution_failed", err.Error())
 			return

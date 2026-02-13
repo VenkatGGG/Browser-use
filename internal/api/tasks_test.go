@@ -114,6 +114,9 @@ func TestCreateTaskWithActionsQueued(t *testing.T) {
 	if len(created.Actions) != 3 {
 		t.Fatalf("expected 3 task actions, got %d", len(created.Actions))
 	}
+	if gotTraceID := rr.Header().Get("X-Trace-Id"); gotTraceID != "trc_"+created.ID {
+		t.Fatalf("expected X-Trace-Id trc_%s, got %q", created.ID, gotTraceID)
+	}
 	if dispatcher.lastTaskID != created.ID {
 		t.Fatalf("expected dispatched task id %s, got %s", created.ID, dispatcher.lastTaskID)
 	}
@@ -1122,6 +1125,12 @@ func TestReplayTaskIdempotencyKeyReturnsSameTaskAndSingleDispatch(t *testing.T) 
 	}
 	if first.ID == "" || second.ID == "" {
 		t.Fatalf("expected non-empty replay task ids")
+	}
+	if gotTraceID := rr1.Header().Get("X-Trace-Id"); gotTraceID != "trc_"+first.ID {
+		t.Fatalf("expected first replay X-Trace-Id trc_%s, got %q", first.ID, gotTraceID)
+	}
+	if gotTraceID := rr2.Header().Get("X-Trace-Id"); gotTraceID != "trc_"+second.ID {
+		t.Fatalf("expected second replay X-Trace-Id trc_%s, got %q", second.ID, gotTraceID)
 	}
 	if first.ID != second.ID {
 		t.Fatalf("expected same replay task id for idempotent requests, got %s and %s", first.ID, second.ID)

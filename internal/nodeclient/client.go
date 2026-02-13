@@ -35,6 +35,7 @@ type StepTrace struct {
 
 type ExecuteInput struct {
 	TaskID  string   `json:"task_id"`
+	TraceID string   `json:"trace_id,omitempty"`
 	URL     string   `json:"url"`
 	Goal    string   `json:"goal"`
 	Actions []Action `json:"actions,omitempty"`

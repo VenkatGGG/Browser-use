@@ -53,6 +53,7 @@ func (s *InMemoryStore) Get(_ context.Context, scope, key string) (Entry, bool, 
 	}
 	entry := item.entry
 	entry.Body = append([]byte(nil), entry.Body...)
+	entry.Headers = cloneHeaders(entry.Headers)
 	return entry, true, nil
 }
 
@@ -97,11 +98,23 @@ func (s *InMemoryStore) Save(_ context.Context, scope, key string, entry Entry, 
 	defer s.mu.Unlock()
 	cloned := entry
 	cloned.Body = append([]byte(nil), entry.Body...)
+	cloned.Headers = cloneHeaders(entry.Headers)
 	s.items[compound] = memoryItem{
 		entry:     cloned,
 		expiresAt: now.Add(ttl),
 	}
 	return nil
+}
+
+func cloneHeaders(src map[string][]string) map[string][]string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(src))
+	for key, values := range src {
+		out[key] = append([]string(nil), values...)
+	}
+	return out
 }
 
 func (s *InMemoryStore) Release(_ context.Context, scope, key, owner string) error {

@@ -63,6 +63,7 @@ func (s *Server) handleIdempotentRequest(w http.ResponseWriter, r *http.Request,
 	entry := idempotency.Entry{
 		StatusCode:  result.StatusCode,
 		ContentType: result.Header.Get("Content-Type"),
+		Headers:     cloneResponseHeaders(result.Header),
 		Body:        bytes.Clone(body),
 	}
 	if result.StatusCode < 500 {
@@ -97,6 +98,12 @@ func (s *Server) waitForIdempotentEntry(ctx context.Context, scope, key string, 
 }
 
 func writeIdempotencyEntry(w http.ResponseWriter, entry idempotency.Entry) {
+	for key, values := range entry.Headers {
+		w.Header().Del(key)
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
 	contentType := strings.TrimSpace(entry.ContentType)
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
@@ -121,4 +128,15 @@ func copyResponse(w http.ResponseWriter, header http.Header, status int, body []
 	}
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
+}
+
+func cloneResponseHeaders(src http.Header) map[string][]string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(src))
+	for key, values := range src {
+		out[key] = append([]string(nil), values...)
+	}
+	return out
 }

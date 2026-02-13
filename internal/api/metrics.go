@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -53,6 +54,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	completed := 0
 	failed := 0
 	blocked := 0
+	sandboxCrashes := 0
+	stepLatenciesMS := make([]int64, 0, len(items)*2)
 	for _, item := range items {
 		status := strings.TrimSpace(string(item.Status))
 		if status == "" {
@@ -67,10 +70,18 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 		if item.Status == task.StatusFailed {
 			failed++
+			if isSandboxCrashError(item.ErrorMessage) {
+				sandboxCrashes++
+			}
 		}
 		if blocker := strings.TrimSpace(item.BlockerType); blocker != "" {
 			blocked++
 			blockerCounts[blocker]++
+		}
+		for _, step := range item.Trace {
+			if step.DurationMS > 0 {
+				stepLatenciesMS = append(stepLatenciesMS, step.DurationMS)
+			}
 		}
 	}
 
@@ -91,6 +102,11 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if failed > 0 {
 		blockRate = (float64(blocked) / float64(failed)) * 100.0
 	}
+	sandboxCrashRate := 0.0
+	if failed > 0 {
+		sandboxCrashRate = (float64(sandboxCrashes) / float64(failed)) * 100.0
+	}
+	p95StepLatency := percentile(stepLatenciesMS, 95)
 
 	var b strings.Builder
 	fmt.Fprintln(&b, "# HELP browseruse_tasks_window_size Number of recent tasks used for metrics")
@@ -121,6 +137,15 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(&b, "# HELP browseruse_tasks_block_rate_percent Blocked/failed percent")
 	fmt.Fprintln(&b, "# TYPE browseruse_tasks_block_rate_percent gauge")
 	fmt.Fprintf(&b, "browseruse_tasks_block_rate_percent %.2f\n", blockRate)
+	fmt.Fprintln(&b, "# HELP browseruse_tasks_sandbox_crash_total Sandbox-like execution crashes in failed tasks window")
+	fmt.Fprintln(&b, "# TYPE browseruse_tasks_sandbox_crash_total gauge")
+	fmt.Fprintf(&b, "browseruse_tasks_sandbox_crash_total %d\n", sandboxCrashes)
+	fmt.Fprintln(&b, "# HELP browseruse_tasks_sandbox_crash_rate_percent Sandbox-like crash rate among failed tasks")
+	fmt.Fprintln(&b, "# TYPE browseruse_tasks_sandbox_crash_rate_percent gauge")
+	fmt.Fprintf(&b, "browseruse_tasks_sandbox_crash_rate_percent %.2f\n", sandboxCrashRate)
+	fmt.Fprintln(&b, "# HELP browseruse_tasks_p95_step_latency_ms p95 action step latency in milliseconds")
+	fmt.Fprintln(&b, "# TYPE browseruse_tasks_p95_step_latency_ms gauge")
+	fmt.Fprintf(&b, "browseruse_tasks_p95_step_latency_ms %d\n", p95StepLatency)
 
 	fmt.Fprintln(&b, "# HELP browseruse_tasks_blocker_total Task blocker count by blocker type")
 	fmt.Fprintln(&b, "# TYPE browseruse_tasks_blocker_total gauge")
@@ -154,4 +179,51 @@ func sortedIntMapKeys(values map[string]int) []string {
 func metricLabelEscape(value string) string {
 	escaped := strings.ReplaceAll(value, `\`, `\\`)
 	return strings.ReplaceAll(escaped, `"`, `\"`)
+}
+
+func percentile(values []int64, p int) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	if p <= 0 {
+		p = 1
+	}
+	if p > 100 {
+		p = 100
+	}
+	sorted := append([]int64(nil), values...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	index := int(math.Ceil((float64(p)/100.0)*float64(len(sorted)))) - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(sorted) {
+		index = len(sorted) - 1
+	}
+	return sorted[index]
+}
+
+func isSandboxCrashError(message string) bool {
+	msg := strings.ToLower(strings.TrimSpace(message))
+	if msg == "" {
+		return false
+	}
+	signals := []string{
+		"connection refused",
+		"connection reset",
+		"dial tcp",
+		"no such host",
+		"bad gateway",
+		"eof",
+		"unexpected status 5",
+		"sandbox crashed",
+		"chromium crashed",
+		"browser process",
+	}
+	for _, signal := range signals {
+		if strings.Contains(msg, signal) {
+			return true
+		}
+	}
+	return false
 }

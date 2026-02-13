@@ -276,6 +276,11 @@ func TestMetricsRoute(t *testing.T) {
 		TaskID:    completedTask.ID,
 		NodeID:    "node-1",
 		Completed: completedTask.CreatedAt.Add(2 * time.Second),
+		Trace: []task.StepTrace{
+			{Index: 1, DurationMS: 120},
+			{Index: 2, DurationMS: 300},
+			{Index: 3, DurationMS: 450},
+		},
 	})
 	if err != nil {
 		t.Fatalf("complete task: %v", err)
@@ -292,7 +297,7 @@ func TestMetricsRoute(t *testing.T) {
 	_, err = taskSvc.Fail(t.Context(), task.FailInput{
 		TaskID:         failedTask.ID,
 		Completed:      failedTask.CreatedAt.Add(3 * time.Second),
-		Error:          "blocked",
+		Error:          "dial tcp 127.0.0.1:3000: connect: connection refused",
 		BlockerType:    "human_verification_required",
 		BlockerMessage: "captcha",
 	})
@@ -321,6 +326,12 @@ func TestMetricsRoute(t *testing.T) {
 	}
 	if !strings.Contains(body, "browseruse_tasks_blocker_total{blocker_type=\"human_verification_required\"} 1") {
 		t.Fatalf("metrics body missing blocker count: %s", body)
+	}
+	if !strings.Contains(body, "browseruse_tasks_p95_step_latency_ms 450") {
+		t.Fatalf("metrics body missing p95 step latency: %s", body)
+	}
+	if !strings.Contains(body, "browseruse_tasks_sandbox_crash_rate_percent 100.00") {
+		t.Fatalf("metrics body missing sandbox crash rate: %s", body)
 	}
 }
 

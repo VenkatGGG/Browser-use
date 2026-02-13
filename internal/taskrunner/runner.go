@@ -199,6 +199,10 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 		r.failTask(ctx, taskRecord.ID, "", fmt.Errorf("failed to start task: %w", err))
 		return
 	}
+	traceID := traceIDForTask(startedTask.ID)
+	if traceID != "" {
+		r.logger.Printf("trace_id=%s worker=%d started task_id=%s", traceID, workerID, startedTask.ID)
+	}
 
 	if active, domain, until := r.isDomainBlocked(startedTask.URL, time.Now().UTC()); active {
 		r.failTaskWithEvidence(ctx, startedTask.ID, "", fmt.Errorf("blocked (domain_cooldown): domain %s is in cooldown until %s", domain, until.Format(time.RFC3339)), failureEvidence{
@@ -229,6 +233,7 @@ func (r *Runner) processTask(ctx context.Context, workerID int, taskID string) {
 
 	result, err := r.executor.Execute(execCtx, nodeLease.Node.Address, nodeclient.ExecuteInput{
 		TaskID:  startedTask.ID,
+		TraceID: traceID,
 		URL:     startedTask.URL,
 		Goal:    startedTask.Goal,
 		Actions: mapNodeActions(startedTask.Actions),
@@ -641,7 +646,11 @@ type failureEvidence struct {
 }
 
 func (r *Runner) failTaskWithEvidence(ctx context.Context, taskID, nodeID string, err error, evidence failureEvidence) {
-	r.logger.Printf("task %s failed: %v", taskID, err)
+	if traceID := traceIDForTask(taskID); traceID != "" {
+		r.logger.Printf("trace_id=%s task %s failed: %v", traceID, taskID, err)
+	} else {
+		r.logger.Printf("task %s failed: %v", taskID, err)
+	}
 	_, _ = r.tasks.Fail(ctx, task.FailInput{
 		TaskID:                taskID,
 		NodeID:                nodeID,
@@ -801,4 +810,12 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func traceIDForTask(taskID string) string {
+	id := strings.TrimSpace(taskID)
+	if id == "" {
+		return ""
+	}
+	return "trc_" + id
 }

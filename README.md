@@ -150,6 +150,8 @@ Local-first orchestration infrastructure for AI browser automation.
 - Added lightweight Prometheus-style metrics endpoint:
   - `GET /metrics`
   - task status totals, success/block rates, blocker totals, node state totals
+  - `browseruse_tasks_p95_step_latency_ms` from recent task trace timings
+  - `browseruse_tasks_sandbox_crash_total` and `browseruse_tasks_sandbox_crash_rate_percent`
   - optional window control: `GET /metrics?limit=1000`
 - Frontend split started:
   - new TypeScript dashboard workspace in `web/` (React + Redux Toolkit + TanStack Query)
@@ -315,6 +317,7 @@ make ui-build        # build separated TypeScript dashboard
 - Planner mode defaults to `template`; set `NODE_AGENT_PLANNER_MODE=endpoint` to call an external planner API using compact page state, or `NODE_AGENT_PLANNER_MODE=openai` to use direct model-backed planning.
 - `GET /v1/tasks?limit=N` returns recent tasks (newest first) for dashboard polling.
 - `GET /v1/tasks/stats?limit=N` returns aggregated status/blocker metrics over recent tasks.
+- `POST /v1/tasks` and `POST /v1/tasks/{id}/replay` include `X-Trace-Id: trc_<task_id>` in responses for log correlation across orchestrator, runner, and node-agent.
 - `Idempotency-Key` header is supported on `POST /v1/sessions`, `POST /v1/tasks`, and `POST /v1/tasks/{id}/replay`.
 - Optional API safety controls:
   - `ORCHESTRATOR_API_KEY=<secret>` enforces API key auth on create/replay routes (`POST /sessions`, `POST /v1/sessions`, `POST /task`, `POST /v1/tasks`, `POST /v1/tasks/{id}/replay`).

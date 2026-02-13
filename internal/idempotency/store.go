@@ -6,9 +6,10 @@ import (
 )
 
 type Entry struct {
-	StatusCode  int    `json:"status_code"`
-	ContentType string `json:"content_type"`
-	Body        []byte `json:"body"`
+	StatusCode  int                 `json:"status_code"`
+	ContentType string              `json:"content_type"`
+	Headers     map[string][]string `json:"headers,omitempty"`
+	Body        []byte              `json:"body"`
 }
 
 type Store interface {

@@ -226,6 +226,7 @@ func (s *Server) createAndQueueTaskNonIdempotent(w http.ResponseWriter, r *http.
 	}
 
 	queued, status, ok := s.enqueueCreatedTask(r.Context(), created)
+	setTaskTraceHeader(w, created.ID)
 	if !ok {
 		httpx.WriteJSON(w, status, queued)
 		return
@@ -239,6 +240,7 @@ func (s *Server) createAndQueueTaskNonIdempotent(w http.ResponseWriter, r *http.
 	if waitForCompletion {
 		timeout := normalizedWaitTimeout(req.WaitTimeoutMS)
 		if completed, done := s.waitForTaskTerminalState(r.Context(), created.ID, timeout); done {
+			setTaskTraceHeader(w, created.ID)
 			httpx.WriteJSON(w, http.StatusOK, completed)
 			return
 		}
@@ -362,6 +364,7 @@ func (s *Server) replayTaskNonIdempotent(w http.ResponseWriter, r *http.Request,
 	}
 
 	queued, status, ok := s.enqueueCreatedTask(r.Context(), created)
+	setTaskTraceHeader(w, created.ID)
 	if !ok {
 		httpx.WriteJSON(w, status, queued)
 		return
@@ -629,4 +632,12 @@ func mapTaskActions(actions []taskActionRequest) []task.Action {
 		})
 	}
 	return mapped
+}
+
+func setTaskTraceHeader(w http.ResponseWriter, taskID string) {
+	id := strings.TrimSpace(taskID)
+	if id == "" {
+		return
+	}
+	w.Header().Set("X-Trace-Id", "trc_"+id)
 }
