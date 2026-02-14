@@ -332,8 +332,8 @@ export function App() {
   return (
     <main className="page">
       <header className="header">
-        <h1>Browser-use Dashboard (TS Migration)</h1>
-        <p>Redux handles local UI state. TanStack Query handles polling, caching, lineage fetches, and mutations.</p>
+        <h1>Browser-use</h1>
+        <p>Task orchestration dashboard — live polling, execution trace, node fleet control.</p>
       </header>
 
       <section className="controls">
@@ -409,12 +409,12 @@ export function App() {
       </section>
 
       <section className="kpis">
-        <div>Nodes: {nodes.length}</div>
-        <div>Queued: {statusCounts.queued ?? 0}</div>
-        <div>Running: {statusCounts.running ?? 0}</div>
-        <div>Completed: {statusCounts.completed ?? 0}</div>
-        <div>Failed: {statusCounts.failed ?? 0}</div>
-        <div>Canceled: {statusCounts.canceled ?? 0}</div>
+        <div data-label="Nodes"><span className="kpiValue">{nodes.length}</span></div>
+        <div data-label="Queued"><span className="kpiValue">{statusCounts.queued ?? 0}</span></div>
+        <div data-label="Running"><span className="kpiValue">{statusCounts.running ?? 0}</span></div>
+        <div data-label="Completed"><span className="kpiValue">{statusCounts.completed ?? 0}</span></div>
+        <div data-label="Failed"><span className="kpiValue">{statusCounts.failed ?? 0}</span></div>
+        <div data-label="Canceled"><span className="kpiValue">{statusCounts.canceled ?? 0}</span></div>
       </section>
 
       <section className="composePane">
