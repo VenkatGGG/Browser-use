@@ -1,37 +1,42 @@
 /* ─── Design Tokens ─────────────────────────────────────── */
 :root {
-  --bg: #060c14;
-  --surface: #0c1623;
-  --card: #101d2e;
-  --card-raised: #152437;
-  --border: #1c2d40;
-  --border-bright: #2a3e56;
+  --bg: #FAF7F2;
+  --surface: #F3EDE5;
+  --card: #FFFFFF;
+  --card-raised: #FFF8F0;
+  --border: #E8DFD3;
+  --border-bright: #D4C9BA;
 
-  --text-primary: #dde8f5;
-  --text-secondary: #6e8aa0;
-  --text-muted: #3d5269;
+  --text-primary: #2C2418;
+  --text-secondary: #7A6E5D;
+  --text-muted: #AD9F8E;
 
-  --accent: #00c8ff;
-  --accent-dim: rgba(0, 200, 255, 0.1);
-  --accent-glow: 0 0 20px rgba(0, 200, 255, 0.18);
+  --accent: #E36B2E;
+  --accent-hover: #CC5A1E;
+  --accent-dim: rgba(227, 107, 46, 0.08);
+  --accent-glow: 0 2px 12px rgba(227, 107, 46, 0.12);
 
-  --success: #00e87a;
-  --success-dim: rgba(0, 232, 122, 0.1);
-  --warning: #ffb020;
-  --warning-dim: rgba(255, 176, 32, 0.12);
-  --danger: #ff4545;
-  --danger-dim: rgba(255, 69, 69, 0.1);
-  --muted-dim: rgba(61, 82, 105, 0.18);
+  --success: #3B9B62;
+  --success-dim: rgba(59, 155, 98, 0.08);
+  --warning: #D4920A;
+  --warning-dim: rgba(212, 146, 10, 0.08);
+  --danger: #C9423F;
+  --danger-dim: rgba(201, 66, 63, 0.06);
+  --muted-dim: rgba(173, 159, 142, 0.12);
 
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 14px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
 
-  --font-display: 'Syne', 'Segoe UI', sans-serif;
-  --font-body: 'DM Sans', 'Segoe UI', sans-serif;
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Outfit', 'Helvetica Neue', sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
 
-  color-scheme: dark;
+  --shadow-sm: 0 1px 3px rgba(44, 36, 24, 0.04), 0 1px 2px rgba(44, 36, 24, 0.03);
+  --shadow-md: 0 4px 12px rgba(44, 36, 24, 0.06), 0 1px 4px rgba(44, 36, 24, 0.04);
+  --shadow-lg: 0 12px 32px rgba(44, 36, 24, 0.08), 0 2px 8px rgba(44, 36, 24, 0.04);
+
+  color-scheme: light;
 }
 
 /* ─── Reset ──────────────────────────────────────────────── */
@@ -47,30 +52,28 @@ body {
   background: var(--bg);
   color: var(--text-primary);
   min-height: 100vh;
-  background-image:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0, 200, 255, 0.06) 0%, transparent 60%),
-    radial-gradient(circle, rgba(0, 200, 255, 0.025) 1px, transparent 1px);
-  background-size: 100% 100%, 28px 28px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ─── Page Entry Animation ───────────────────────────────── */
 @keyframes pageIn {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 .page {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 24px 28px;
-  animation: pageIn 0.35s ease-out;
+  padding: 32px 36px;
+  animation: pageIn 0.4s ease-out;
 }
 
 /* ─── Header ─────────────────────────────────────────────── */
 .header {
-  margin-bottom: 28px;
+  margin-bottom: 32px;
   position: relative;
-  padding-bottom: 22px;
+  padding-bottom: 24px;
 }
 
 .header::after {
@@ -78,26 +81,25 @@ body {
   position: absolute;
   bottom: 0;
   left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(0, 200, 255, 0.5) 0%, transparent 55%);
+  width: 80px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--accent);
 }
 
 .header h1 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 800;
+  font-size: 28px;
+  font-weight: 700;
   letter-spacing: -0.3px;
-  background: linear-gradient(135deg, #dde8f5 25%, #6ec9e6 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--text-primary);
+  font-optical-sizing: auto;
 }
 
 .header p {
-  margin: 7px 0 0;
-  font-size: 12px;
+  margin: 8px 0 0;
+  font-size: 14px;
   color: var(--text-muted);
   font-weight: 400;
   letter-spacing: 0.01em;
@@ -107,16 +109,16 @@ body {
 .controls {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
 .controls label {
   display: grid;
-  gap: 5px;
-  font-size: 10px;
+  gap: 6px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -124,21 +126,22 @@ body {
 .controls input,
 .controls select,
 .controls button {
-  border: 1px solid var(--border-bright);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--card);
   color: var(--text-primary);
-  padding: 8px 10px;
+  padding: 9px 12px;
   font-family: var(--font-body);
   font-size: 13px;
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s, color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
   appearance: none;
   -webkit-appearance: none;
+  box-shadow: var(--shadow-sm);
 }
 
 .controls select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%233d5269'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23AD9F8E'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   padding-right: 28px;
@@ -147,40 +150,39 @@ body {
 .controls input:focus,
 .controls select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(0, 200, 255, 0.08);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 .controls button {
   cursor: pointer;
   font-weight: 600;
   font-size: 12px;
-  background: var(--card-raised);
+  background: var(--card);
   letter-spacing: 0.02em;
   align-self: end;
-  padding: 9px 10px;
+  padding: 10px 12px;
 }
 
 .controls button:hover {
   border-color: var(--accent);
   background: var(--accent-dim);
   color: var(--accent);
-  box-shadow: var(--accent-glow);
 }
 
 /* ─── Quick Filters ──────────────────────────────────────── */
 .quickFilters {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 14px;
   align-items: center;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .quickFilters label {
   display: flex;
   gap: 7px;
   align-items: center;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
@@ -194,26 +196,27 @@ body {
 
 .quickFilters input[type="checkbox"] {
   accent-color: var(--accent);
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   cursor: pointer;
 }
 
 .quickFilters button {
-  border: 1px solid var(--border-bright);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--card);
   color: var(--text-muted);
-  padding: 5px 12px;
-  font-size: 11px;
+  padding: 6px 14px;
+  font-size: 12px;
   font-family: var(--font-body);
   font-weight: 500;
   cursor: pointer;
   transition: all 0.18s;
+  box-shadow: var(--shadow-sm);
 }
 
 .quickFilters button:hover {
-  border-color: var(--text-secondary);
+  border-color: var(--border-bright);
   color: var(--text-primary);
 }
 
@@ -221,45 +224,46 @@ body {
 .kpis {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 20px;
 }
 
 .kpis > div {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--card);
-  padding: 14px 16px 12px;
+  padding: 16px 18px 14px;
   position: relative;
   overflow: hidden;
-  transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+  box-shadow: var(--shadow-sm);
 }
 
 .kpis > div::before {
   content: attr(data-label);
   display: block;
   font-family: var(--font-body);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
   margin-bottom: 8px;
 }
 
 .kpiValue {
-  font-family: var(--font-mono);
-  font-size: 28px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
   color: var(--text-primary);
   line-height: 1;
   letter-spacing: -0.5px;
 }
 
 .kpis > div:hover {
-  border-color: var(--border-bright);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 /* ─── Compose Pane ───────────────────────────────────────── */
@@ -267,9 +271,10 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--card);
-  padding: 20px;
-  margin-bottom: 16px;
+  padding: 24px;
+  margin-bottom: 20px;
   transition: border-color 0.2s;
+  box-shadow: var(--shadow-sm);
 }
 
 .composePane:focus-within {
@@ -277,26 +282,25 @@ body {
 }
 
 .composePane h2 {
-  margin: 0 0 16px;
+  margin: 0 0 18px;
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
 }
 
 .composeForm {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .composeForm label {
   display: grid;
-  gap: 5px;
-  font-size: 10px;
+  gap: 6px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -304,11 +308,11 @@ body {
 .composeForm input,
 .composeForm textarea,
 .composeForm button {
-  border: 1px solid var(--border-bright);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--bg);
   color: var(--text-primary);
-  padding: 9px 12px;
+  padding: 10px 14px;
   font-family: var(--font-body);
   font-size: 13px;
   outline: none;
@@ -318,7 +322,7 @@ body {
 .composeForm input:focus,
 .composeForm textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(0, 200, 255, 0.07);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 .composeForm textarea {
@@ -330,41 +334,42 @@ body {
 }
 
 .composeForm button[type="submit"] {
-  background: linear-gradient(135deg, rgba(0, 200, 255, 0.12), rgba(0, 200, 255, 0.04));
-  border-color: rgba(0, 200, 255, 0.4);
-  color: var(--accent);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  letter-spacing: 0.04em;
-  font-size: 12px;
+  letter-spacing: 0.02em;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
 }
 
 .composeForm button[type="submit"]:hover:not(:disabled) {
-  background: rgba(0, 200, 255, 0.18);
-  border-color: var(--accent);
-  box-shadow: 0 0 18px rgba(0, 200, 255, 0.15);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  box-shadow: var(--accent-glow);
 }
 
 .composeForm button[type="submit"]:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .composeHint {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   line-height: 1.5;
 }
 
 .composeStatus {
-  margin-top: 12px;
-  border: 1px dashed var(--border-bright);
+  margin-top: 14px;
+  border: 1px dashed var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
-  padding: 10px 12px;
-  font-size: 11px;
+  background: var(--bg);
+  padding: 10px 14px;
+  font-size: 12px;
   font-family: var(--font-mono);
   color: var(--text-secondary);
   line-height: 1.6;
@@ -374,7 +379,7 @@ body {
 .layout {
   display: grid;
   grid-template-columns: 1fr 380px;
-  gap: 12px;
+  gap: 16px;
   align-items: start;
 }
 
@@ -383,38 +388,38 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--card);
-  padding: 18px 20px;
-  margin-bottom: 14px;
+  padding: 22px 24px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow-sm);
 }
 
 .nodesPane h2 {
-  margin: 0 0 14px;
+  margin: 0 0 16px;
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
 }
 
 .nodeGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
 }
 
 .nodeCard {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 13px 15px;
-  background: var(--surface);
-  transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+  padding: 14px 16px;
+  background: var(--bg);
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
 }
 
 .nodeCard:hover {
   border-color: var(--border-bright);
   transform: translateY(-1px);
-  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-md);
 }
 
 .nodeHead {
@@ -449,6 +454,7 @@ body {
   border-radius: var(--radius-lg);
   background: var(--card);
   overflow: auto;
+  box-shadow: var(--shadow-sm);
 }
 
 .tablePane table {
@@ -460,19 +466,19 @@ body {
 .tablePane td {
   text-align: left;
   border-bottom: 1px solid var(--border);
-  padding: 10px 12px;
-  font-size: 12px;
+  padding: 11px 14px;
+  font-size: 13px;
   vertical-align: middle;
   transition: background 0.1s;
 }
 
 .tablePane th {
-  background: var(--surface);
+  background: var(--bg);
   position: sticky;
   top: 0;
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
   z-index: 1;
@@ -497,7 +503,7 @@ body {
 }
 
 .tablePane tr.selected td {
-  background: rgba(0, 200, 255, 0.05);
+  background: var(--accent-dim);
 }
 
 .tablePane tr.selected td:first-child {
@@ -514,11 +520,11 @@ body {
 /* ─── Status Pills ───────────────────────────────────────── */
 .pill {
   border-radius: 999px;
-  padding: 3px 9px;
-  font-size: 9px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  letter-spacing: 0.03em;
   text-transform: uppercase;
   display: inline-flex;
   align-items: center;
@@ -528,8 +534,8 @@ body {
 
 .pill::before {
   content: '';
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -537,14 +543,14 @@ body {
 .pill.queued {
   background: var(--warning-dim);
   color: var(--warning);
-  border: 1px solid rgba(255, 176, 32, 0.2);
+  border: 1px solid rgba(212, 146, 10, 0.2);
 }
 .pill.queued::before { background: var(--warning); }
 
 .pill.running {
-  background: rgba(0, 200, 255, 0.1);
+  background: var(--accent-dim);
   color: var(--accent);
-  border: 1px solid rgba(0, 200, 255, 0.25);
+  border: 1px solid rgba(227, 107, 46, 0.2);
 }
 .pill.running::before {
   background: var(--accent);
@@ -554,27 +560,27 @@ body {
 .pill.completed {
   background: var(--success-dim);
   color: var(--success);
-  border: 1px solid rgba(0, 232, 122, 0.2);
+  border: 1px solid rgba(59, 155, 98, 0.2);
 }
 .pill.completed::before { background: var(--success); }
 
 .pill.failed {
   background: var(--danger-dim);
   color: var(--danger);
-  border: 1px solid rgba(255, 69, 69, 0.2);
+  border: 1px solid rgba(201, 66, 63, 0.15);
 }
 .pill.failed::before { background: var(--danger); }
 
 .pill.canceled {
   background: var(--muted-dim);
   color: var(--text-secondary);
-  border: 1px solid var(--border-bright);
+  border: 1px solid var(--border);
 }
 .pill.canceled::before { background: var(--text-muted); }
 
 @keyframes livePulse {
-  0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(0, 200, 255, 0.4); }
-  50% { opacity: 0.5; transform: scale(0.7); box-shadow: 0 0 0 4px rgba(0, 200, 255, 0); }
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.6); }
 }
 
 /* ─── Action Buttons ─────────────────────────────────────── */
@@ -585,12 +591,12 @@ body {
 }
 
 .actions button {
-  border: 1px solid var(--border-bright);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: var(--card);
   color: var(--text-secondary);
-  padding: 5px 10px;
-  font-size: 11px;
+  padding: 5px 12px;
+  font-size: 12px;
   font-family: var(--font-body);
   font-weight: 500;
   cursor: pointer;
@@ -609,19 +615,19 @@ body {
 }
 
 .actions button.danger {
-  border-color: rgba(255, 69, 69, 0.25);
+  border-color: rgba(201, 66, 63, 0.2);
   color: var(--danger);
-  background: rgba(255, 69, 69, 0.04);
+  background: var(--danger-dim);
 }
 
 .actions button.danger:hover {
   border-color: var(--danger);
-  background: rgba(255, 69, 69, 0.12);
+  background: rgba(201, 66, 63, 0.1);
 }
 
 /* ─── Detail Pane ────────────────────────────────────────── */
 .detailPane {
-  padding: 18px 20px;
+  padding: 20px 22px;
   position: sticky;
   top: 12px;
   max-height: calc(100vh - 24px);
@@ -640,7 +646,7 @@ body {
 }
 
 .detailPane > p {
-  font-size: 12px;
+  font-size: 13px;
   margin: 0 0 10px;
   line-height: 1.5;
   color: var(--text-secondary);
@@ -648,9 +654,9 @@ body {
 
 .detailPane > p strong {
   display: block;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
   margin-bottom: 2px;
@@ -659,27 +665,26 @@ body {
 
 /* ─── Trace Pane ─────────────────────────────────────────── */
 .tracePane {
-  margin-top: 18px;
+  margin-top: 20px;
   border-top: 1px solid var(--border);
-  padding-top: 16px;
+  padding-top: 18px;
 }
 
 .tracePane h3 {
-  margin: 0 0 12px;
+  margin: 0 0 14px;
   font-family: var(--font-display);
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-primary);
+  letter-spacing: -0.1px;
 }
 
 /* Progress bar */
 .traceProgress {
   display: flex;
   gap: 2px;
-  height: 4px;
-  border-radius: 4px;
+  height: 5px;
+  border-radius: 5px;
   overflow: hidden;
   margin-bottom: 8px;
   background: var(--surface);
@@ -687,7 +692,7 @@ body {
 
 .traceProgressSegment {
   flex: 1;
-  border-radius: 2px;
+  border-radius: 3px;
   transition: background 0.3s;
   animation: segmentIn 0.35s ease-out both;
 }
@@ -704,10 +709,10 @@ body {
 .traceStats {
   display: flex;
   justify-content: space-between;
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text-muted);
-  margin-bottom: 12px;
+  margin-bottom: 14px;
   font-weight: 500;
 }
 
@@ -717,7 +722,7 @@ body {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 5px;
+  gap: 6px;
 }
 
 /* Step cards */
@@ -725,25 +730,25 @@ body {
   border: 1px solid var(--border);
   border-left: 3px solid var(--text-muted);
   border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  font-size: 12px;
-  background: var(--surface);
+  padding: 9px 12px;
+  font-size: 13px;
+  background: var(--bg);
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
   animation: stepIn 0.22s ease-out both;
 }
 
 @keyframes stepIn {
-  from { opacity: 0; transform: translateX(-5px); }
+  from { opacity: 0; transform: translateX(-4px); }
   to   { opacity: 1; transform: translateX(0); }
 }
 
 .traceStep:hover {
   background: var(--card);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--shadow-sm);
 }
 
 .traceStepSuccess { border-left-color: var(--success); }
-.traceStepFail    { border-left-color: var(--danger); background: rgba(255, 69, 69, 0.02); }
+.traceStepFail    { border-left-color: var(--danger); background: var(--danger-dim); }
 .traceStepOther   { border-left-color: var(--warning); }
 
 /* Step header */
@@ -786,7 +791,7 @@ body {
 .traceStepLabel {
   font-weight: 500;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -825,11 +830,11 @@ body {
   display: inline-block;
   font-size: 10px;
   font-family: var(--font-mono);
-  background: var(--card-raised);
+  background: var(--surface);
   color: var(--text-secondary);
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 4px;
-  border: 1px solid var(--border-bright);
+  border: 1px solid var(--border);
   white-space: nowrap;
   max-width: 200px;
   overflow: hidden;
@@ -837,8 +842,8 @@ body {
 }
 
 .selectorBadge {
-  background: rgba(0, 200, 255, 0.06);
-  border-color: rgba(0, 200, 255, 0.2);
+  background: var(--accent-dim);
+  border-color: rgba(227, 107, 46, 0.2);
   color: var(--accent);
 }
 
@@ -846,38 +851,38 @@ body {
 .traceDetail {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px dashed var(--border-bright);
+  border-top: 1px dashed var(--border);
   animation: traceSlideIn 0.2s ease-out;
 }
 
 @keyframes traceSlideIn {
-  from { opacity: 0; transform: translateY(-4px); }
+  from { opacity: 0; transform: translateY(-3px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 .traceOutput {
-  font-size: 11px;
+  font-size: 12px;
   font-family: var(--font-mono);
   color: var(--success);
-  background: rgba(0, 232, 122, 0.05);
-  padding: 6px 8px;
-  border-radius: 4px;
+  background: var(--success-dim);
+  padding: 8px 10px;
+  border-radius: 6px;
   margin-bottom: 4px;
   word-break: break-word;
-  border-left: 2px solid rgba(0, 232, 122, 0.4);
+  border-left: 3px solid var(--success);
   line-height: 1.5;
 }
 
 .traceError {
-  font-size: 11px;
+  font-size: 12px;
   font-family: var(--font-mono);
   color: var(--danger);
-  background: rgba(255, 69, 69, 0.05);
-  padding: 6px 8px;
-  border-radius: 4px;
+  background: var(--danger-dim);
+  padding: 8px 10px;
+  border-radius: 6px;
   margin-bottom: 4px;
   word-break: break-word;
-  border-left: 2px solid rgba(255, 69, 69, 0.4);
+  border-left: 3px solid var(--danger);
   line-height: 1.5;
 }
 
@@ -895,12 +900,12 @@ body {
 
 .traceScreenshotBtn {
   margin-top: 8px;
-  border: 1px solid rgba(0, 200, 255, 0.3);
+  border: 1px solid rgba(227, 107, 46, 0.25);
   border-radius: var(--radius-sm);
-  background: rgba(0, 200, 255, 0.05);
+  background: var(--accent-dim);
   color: var(--accent);
-  padding: 5px 12px;
-  font-size: 11px;
+  padding: 6px 14px;
+  font-size: 12px;
   font-family: var(--font-body);
   font-weight: 500;
   cursor: pointer;
@@ -909,27 +914,25 @@ body {
 }
 
 .traceScreenshotBtn:hover {
-  background: var(--accent-dim);
-  box-shadow: 0 0 14px rgba(0, 200, 255, 0.12);
+  background: rgba(227, 107, 46, 0.12);
   border-color: var(--accent);
 }
 
 .traceEmpty {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   font-style: italic;
-  font-family: var(--font-mono);
 }
 
 .traceStep a,
 .traceStep button {
   margin-top: 6px;
-  border: 1px solid var(--border-bright);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
-  padding: 4px 8px;
-  font-size: 11px;
+  padding: 4px 10px;
+  font-size: 12px;
   font-family: var(--font-body);
   cursor: pointer;
   text-decoration: none;
@@ -948,22 +951,22 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--card);
-  padding: 18px 20px;
-  margin-top: 12px;
+  padding: 22px 24px;
+  margin-top: 16px;
+  box-shadow: var(--shadow-sm);
 }
 
 .failuresPane h2 {
-  margin: 0 0 14px;
+  margin: 0 0 16px;
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
 }
 
 .failuresPane > p {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   margin: 0;
   font-style: italic;
@@ -971,18 +974,18 @@ body {
 
 .failureList {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .failureItem {
-  border: 1px solid rgba(255, 69, 69, 0.12);
-  border-left: 3px solid rgba(255, 69, 69, 0.35);
+  border: 1px solid rgba(201, 66, 63, 0.12);
+  border-left: 3px solid rgba(201, 66, 63, 0.3);
   border-radius: var(--radius-sm);
-  background: rgba(255, 69, 69, 0.025);
-  padding: 10px 12px;
+  background: var(--danger-dim);
+  padding: 12px 14px;
   text-align: left;
   display: grid;
-  gap: 3px;
+  gap: 4px;
   cursor: pointer;
   transition: all 0.15s;
   width: 100%;
@@ -990,9 +993,9 @@ body {
 }
 
 .failureItem:hover {
-  border-color: rgba(255, 69, 69, 0.4);
+  border-color: rgba(201, 66, 63, 0.3);
   border-left-color: var(--danger);
-  background: rgba(255, 69, 69, 0.07);
+  background: rgba(201, 66, 63, 0.08);
 }
 
 .failureItem strong {
@@ -1003,22 +1006,22 @@ body {
 }
 
 .failureItem span {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   line-height: 1.4;
 }
 
 .failureError {
-  color: rgba(255, 69, 69, 0.8) !important;
+  color: var(--danger) !important;
 }
 
 /* ─── Modal ──────────────────────────────────────────────── */
 .modalOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(4, 8, 14, 0.88);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(44, 36, 24, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   display: grid;
   place-items: center;
   z-index: 30;
@@ -1034,20 +1037,17 @@ body {
 .modalCard {
   width: min(1100px, 96vw);
   max-height: 92vh;
-  border: 1px solid var(--border-bright);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--card);
   overflow: auto;
-  padding: 18px;
+  padding: 22px;
   animation: modalIn 0.26s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow:
-    0 32px 80px rgba(0, 0, 0, 0.65),
-    0 0 0 1px rgba(255, 255, 255, 0.035),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: var(--shadow-lg);
 }
 
 @keyframes modalIn {
-  from { opacity: 0; transform: scale(0.94) translateY(10px); }
+  from { opacity: 0; transform: scale(0.95) translateY(8px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 
@@ -1056,25 +1056,23 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .modalHead strong {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .modalHead button {
-  border: 1px solid var(--border-bright);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--bg);
   color: var(--text-secondary);
-  padding: 6px 14px;
-  font-size: 12px;
+  padding: 7px 16px;
+  font-size: 13px;
   font-family: var(--font-body);
   cursor: pointer;
   transition: all 0.15s;
@@ -1083,7 +1081,7 @@ body {
 .modalHead button:hover {
   border-color: var(--danger);
   color: var(--danger);
-  background: rgba(255, 69, 69, 0.06);
+  background: var(--danger-dim);
 }
 
 .modalCard img {
@@ -1094,7 +1092,7 @@ body {
 }
 
 /* ─── Scrollbar ──────────────────────────────────────────── */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
