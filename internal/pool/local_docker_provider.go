@@ -13,38 +13,40 @@ import (
 )
 
 type LocalDockerProviderConfig struct {
-	Image              string
-	Network            string
-	ContainerPrefix    string
-	NodeIDPrefix       string
-	NodeGRPCPort       int
-	NodeHTTPPort       int
-	OrchestratorURL    string
-	NodeVersion        string
-	HeartbeatInterval  time.Duration
-	RequestTimeout     time.Duration
-	CDPBaseURL         string
-	RenderDelay        time.Duration
-	ExecuteTimeout     time.Duration
-	PlannerMode        string
-	PlannerEndpointURL string
-	PlannerAuthToken   string
-	PlannerModel       string
-	PlannerTimeout     time.Duration
-	PlannerMaxElements int
-	PlannerMaxSteps    int
-	PlannerMaxFailures int
-	TraceScreenshots   bool
-	HumanizeMode       string
-	HumanizeSeed       int64
-	EgressMode         string
-	EgressAllowHosts   string
-	SeccompProfile     string
-	XVFBScreenGeometry string
-	ChromeDebugPort    int
-	DefaultMemoryLimit string
-	DefaultCPULimit    string
-	DefaultPIDsLimit   int
+	Image                     string
+	Network                   string
+	ContainerPrefix           string
+	NodeIDPrefix              string
+	NodeGRPCPort              int
+	NodeHTTPPort              int
+	OrchestratorURL           string
+	NodeVersion               string
+	HeartbeatInterval         time.Duration
+	RequestTimeout            time.Duration
+	CDPBaseURL                string
+	RenderDelay               time.Duration
+	ExecuteTimeout            time.Duration
+	PlannerMode               string
+	PlannerEndpointURL        string
+	PlannerAuthToken          string
+	PlannerModel              string
+	PlannerTimeout            time.Duration
+	PlannerMaxElements        int
+	PlannerMaxSteps           int
+	PlannerMaxFailures        int
+	PlannerMaxRepeatActions   int
+	PlannerMaxRepeatSnapshots int
+	TraceScreenshots          bool
+	HumanizeMode              string
+	HumanizeSeed              int64
+	EgressMode                string
+	EgressAllowHosts          string
+	SeccompProfile            string
+	XVFBScreenGeometry        string
+	ChromeDebugPort           int
+	DefaultMemoryLimit        string
+	DefaultCPULimit           string
+	DefaultPIDsLimit          int
 }
 
 type LocalDockerProvider struct {
@@ -100,6 +102,12 @@ func NewLocalDockerProvider(cfg LocalDockerProviderConfig) (*LocalDockerProvider
 	if cfg.PlannerMaxFailures < 0 {
 		cfg.PlannerMaxFailures = 0
 	}
+	if cfg.PlannerMaxRepeatActions <= 0 {
+		cfg.PlannerMaxRepeatActions = 3
+	}
+	if cfg.PlannerMaxRepeatSnapshots <= 0 {
+		cfg.PlannerMaxRepeatSnapshots = 3
+	}
 	if strings.TrimSpace(cfg.XVFBScreenGeometry) == "" {
 		cfg.XVFBScreenGeometry = "1280x720x24"
 	}
@@ -145,28 +153,30 @@ func (p *LocalDockerProvider) ProvisionNode(ctx context.Context, input Provision
 	address := fmt.Sprintf("%s:%d", containerName, p.cfg.NodeGRPCPort)
 
 	envVars := map[string]string{
-		"NODE_AGENT_NODE_ID":              nodeID,
-		"NODE_AGENT_ADVERTISE_ADDR":       address,
-		"NODE_AGENT_ORCHESTRATOR_URL":     p.cfg.OrchestratorURL,
-		"NODE_AGENT_VERSION":              p.cfg.NodeVersion,
-		"NODE_AGENT_HTTP_ADDR":            fmt.Sprintf(":%d", p.cfg.NodeHTTPPort),
-		"NODE_AGENT_GRPC_ADDR":            fmt.Sprintf(":%d", p.cfg.NodeGRPCPort),
-		"NODE_AGENT_HEARTBEAT_INTERVAL":   p.cfg.HeartbeatInterval.String(),
-		"NODE_AGENT_REQUEST_TIMEOUT":      p.cfg.RequestTimeout.String(),
-		"NODE_AGENT_CDP_BASE_URL":         p.cfg.CDPBaseURL,
-		"NODE_AGENT_RENDER_DELAY":         p.cfg.RenderDelay.String(),
-		"NODE_AGENT_EXECUTE_TIMEOUT":      p.cfg.ExecuteTimeout.String(),
-		"NODE_AGENT_PLANNER_MODE":         p.cfg.PlannerMode,
-		"NODE_AGENT_PLANNER_TIMEOUT":      p.cfg.PlannerTimeout.String(),
-		"NODE_AGENT_PLANNER_MAX_ELEMENTS": fmt.Sprintf("%d", p.cfg.PlannerMaxElements),
-		"NODE_AGENT_PLANNER_MAX_STEPS":    fmt.Sprintf("%d", p.cfg.PlannerMaxSteps),
-		"NODE_AGENT_PLANNER_MAX_FAILURES": fmt.Sprintf("%d", p.cfg.PlannerMaxFailures),
-		"NODE_AGENT_TRACE_SCREENSHOTS":    fmt.Sprintf("%t", p.cfg.TraceScreenshots),
-		"NODE_AGENT_HUMANIZE_MODE":        p.cfg.HumanizeMode,
-		"NODE_AGENT_HUMANIZE_SEED":        fmt.Sprintf("%d", p.cfg.HumanizeSeed),
-		"NODE_AGENT_EGRESS_MODE":          p.cfg.EgressMode,
-		"CHROME_DEBUG_PORT":               fmt.Sprintf("%d", p.cfg.ChromeDebugPort),
-		"XVFB_SCREEN_GEOMETRY":            p.cfg.XVFBScreenGeometry,
+		"NODE_AGENT_NODE_ID":                      nodeID,
+		"NODE_AGENT_ADVERTISE_ADDR":               address,
+		"NODE_AGENT_ORCHESTRATOR_URL":             p.cfg.OrchestratorURL,
+		"NODE_AGENT_VERSION":                      p.cfg.NodeVersion,
+		"NODE_AGENT_HTTP_ADDR":                    fmt.Sprintf(":%d", p.cfg.NodeHTTPPort),
+		"NODE_AGENT_GRPC_ADDR":                    fmt.Sprintf(":%d", p.cfg.NodeGRPCPort),
+		"NODE_AGENT_HEARTBEAT_INTERVAL":           p.cfg.HeartbeatInterval.String(),
+		"NODE_AGENT_REQUEST_TIMEOUT":              p.cfg.RequestTimeout.String(),
+		"NODE_AGENT_CDP_BASE_URL":                 p.cfg.CDPBaseURL,
+		"NODE_AGENT_RENDER_DELAY":                 p.cfg.RenderDelay.String(),
+		"NODE_AGENT_EXECUTE_TIMEOUT":              p.cfg.ExecuteTimeout.String(),
+		"NODE_AGENT_PLANNER_MODE":                 p.cfg.PlannerMode,
+		"NODE_AGENT_PLANNER_TIMEOUT":              p.cfg.PlannerTimeout.String(),
+		"NODE_AGENT_PLANNER_MAX_ELEMENTS":         fmt.Sprintf("%d", p.cfg.PlannerMaxElements),
+		"NODE_AGENT_PLANNER_MAX_STEPS":            fmt.Sprintf("%d", p.cfg.PlannerMaxSteps),
+		"NODE_AGENT_PLANNER_MAX_FAILURES":         fmt.Sprintf("%d", p.cfg.PlannerMaxFailures),
+		"NODE_AGENT_PLANNER_MAX_REPEAT_ACTIONS":   fmt.Sprintf("%d", p.cfg.PlannerMaxRepeatActions),
+		"NODE_AGENT_PLANNER_MAX_REPEAT_SNAPSHOTS": fmt.Sprintf("%d", p.cfg.PlannerMaxRepeatSnapshots),
+		"NODE_AGENT_TRACE_SCREENSHOTS":            fmt.Sprintf("%t", p.cfg.TraceScreenshots),
+		"NODE_AGENT_HUMANIZE_MODE":                p.cfg.HumanizeMode,
+		"NODE_AGENT_HUMANIZE_SEED":                fmt.Sprintf("%d", p.cfg.HumanizeSeed),
+		"NODE_AGENT_EGRESS_MODE":                  p.cfg.EgressMode,
+		"CHROME_DEBUG_PORT":                       fmt.Sprintf("%d", p.cfg.ChromeDebugPort),
+		"XVFB_SCREEN_GEOMETRY":                    p.cfg.XVFBScreenGeometry,
 	}
 	if allowHosts := strings.TrimSpace(p.cfg.EgressAllowHosts); allowHosts != "" {
 		envVars["NODE_AGENT_EGRESS_ALLOW_HOSTS"] = allowHosts

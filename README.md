@@ -392,7 +392,7 @@ Goal: move from one-shot planning to a closed loop where the planner observes ac
    - `extract_text`: extracted output + validation status
 2. Add blocker-aware feedback (`captcha`, `human_verification_required`) so planner can terminate instead of looping.
 
-### Phase 3: Reliability and Guardrails (next)
+### Phase 3: Reliability and Guardrails (in progress)
 1. Re-plan only on safe conditions; avoid infinite oscillation.
 2. Add loop-detection heuristics:
    - repeated same action/selector
@@ -441,6 +441,8 @@ Goal: move from one-shot planning to a closed loop where the planner observes ac
 | `NODE_AGENT_PLANNER_MAX_ELEMENTS` | Max DOM elements sent to planner | `50` |
 | `NODE_AGENT_PLANNER_MAX_STEPS` | Max planner-produced actions per task | `12` |
 | `NODE_AGENT_PLANNER_MAX_FAILURES` | Planner retry budget before failing planning | `2` |
+| `NODE_AGENT_PLANNER_MAX_REPEAT_ACTIONS` | Stop planner loop after repeated same action signature | `3` |
+| `NODE_AGENT_PLANNER_MAX_REPEAT_SNAPSHOTS` | Stop planner loop after repeated identical page signatures | `3` |
 | `NODE_AGENT_TRACE_SCREENSHOTS` | Enable per-step trace screenshots | `false` |
 
 ---
@@ -568,6 +570,7 @@ browser-use/
 - Task trace steps now include planner metadata (`planner.mode`, `planner.round`, `planner.failure_count`, `planner.stop_reason`) for phase-0 re-planning observability.
 - Goal-driven runs now execute in closed-loop planner rounds (`observe -> plan one step -> act -> observe`) instead of one-shot full-plan execution.
 - Planner round context now includes structured `last_action_result.result` feedback (URL delta, click focus check, type value verification, extract validation, blocker fields).
+- Planner guardrails now stop loops on repeated action signatures or repeated snapshot signatures (`loop_detected_repeated_action`, `loop_detected_repeated_snapshot`).
 - Dashboard task submission now auto-creates a session when `session_id` is omitted, using `tenant_id` if provided.
 - The `POST /task` convenience endpoint waits for task completion by default. Use `POST /v1/tasks` for async queuing.
 - `X-Trace-Id: trc_<task_id>` is returned in task creation responses for log correlation.

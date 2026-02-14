@@ -27,30 +27,32 @@ import (
 )
 
 type config struct {
-	HTTPAddr           string
-	GRPCAddr           string
-	NodeID             string
-	Version            string
-	OrchestratorURL    string
-	AdvertiseAddr      string
-	HeartbeatInterval  time.Duration
-	RequestTimeout     time.Duration
-	CDPBaseURL         string
-	RenderDelay        time.Duration
-	ExecuteTimeout     time.Duration
-	PlannerMode        string
-	PlannerEndpoint    string
-	PlannerAuthToken   string
-	PlannerModel       string
-	PlannerTimeout     time.Duration
-	PlannerMaxElements int
-	PlannerMaxSteps    int
-	PlannerMaxFailures int
-	TraceScreenshots   bool
-	HumanizeMode       string
-	HumanizeSeed       int64
-	EgressMode         string
-	EgressAllowHosts   []string
+	HTTPAddr                  string
+	GRPCAddr                  string
+	NodeID                    string
+	Version                   string
+	OrchestratorURL           string
+	AdvertiseAddr             string
+	HeartbeatInterval         time.Duration
+	RequestTimeout            time.Duration
+	CDPBaseURL                string
+	RenderDelay               time.Duration
+	ExecuteTimeout            time.Duration
+	PlannerMode               string
+	PlannerEndpoint           string
+	PlannerAuthToken          string
+	PlannerModel              string
+	PlannerTimeout            time.Duration
+	PlannerMaxElements        int
+	PlannerMaxSteps           int
+	PlannerMaxFailures        int
+	PlannerMaxRepeatActions   int
+	PlannerMaxRepeatSnapshots int
+	TraceScreenshots          bool
+	HumanizeMode              string
+	HumanizeSeed              int64
+	EgressMode                string
+	EgressAllowHosts          []string
 }
 
 type registerNodeRequest struct {
@@ -144,17 +146,19 @@ func (e *executeFlowError) Error() string {
 }
 
 type browserExecutor struct {
-	cdpBaseURL         string
-	renderDelay        time.Duration
-	executeTimeout     time.Duration
-	planner            actionPlanner
-	plannerMaxSteps    int
-	plannerMaxFailures int
-	traceScreenshots   bool
-	humanizer          *humanizer
-	egressMode         string
-	egressAllowHosts   []string
-	mu                 sync.Mutex
+	cdpBaseURL                string
+	renderDelay               time.Duration
+	executeTimeout            time.Duration
+	planner                   actionPlanner
+	plannerMaxSteps           int
+	plannerMaxFailures        int
+	plannerMaxRepeatActions   int
+	plannerMaxRepeatSnapshots int
+	traceScreenshots          bool
+	humanizer                 *humanizer
+	egressMode                string
+	egressAllowHosts          []string
+	mu                        sync.Mutex
 }
 
 func newBrowserExecutor(cfg config) *browserExecutor {
@@ -170,12 +174,14 @@ func newBrowserExecutor(cfg config) *browserExecutor {
 			Timeout:     cfg.PlannerTimeout,
 			MaxElements: cfg.PlannerMaxElements,
 		}),
-		plannerMaxSteps:    maxIntValue(cfg.PlannerMaxSteps, 1),
-		plannerMaxFailures: maxIntValue(cfg.PlannerMaxFailures, 0),
-		traceScreenshots:   cfg.TraceScreenshots,
-		humanizer:          newHumanizer(cfg.HumanizeMode, cfg.HumanizeSeed),
-		egressMode:         normalizeEgressMode(cfg.EgressMode),
-		egressAllowHosts:   append([]string(nil), cfg.EgressAllowHosts...),
+		plannerMaxSteps:           maxIntValue(cfg.PlannerMaxSteps, 1),
+		plannerMaxFailures:        maxIntValue(cfg.PlannerMaxFailures, 0),
+		plannerMaxRepeatActions:   maxIntValue(cfg.PlannerMaxRepeatActions, 1),
+		plannerMaxRepeatSnapshots: maxIntValue(cfg.PlannerMaxRepeatSnapshots, 1),
+		traceScreenshots:          cfg.TraceScreenshots,
+		humanizer:                 newHumanizer(cfg.HumanizeMode, cfg.HumanizeSeed),
+		egressMode:                normalizeEgressMode(cfg.EgressMode),
+		egressAllowHosts:          append([]string(nil), cfg.EgressAllowHosts...),
 	}
 }
 
@@ -258,6 +264,10 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 		stepPlanner := newStaticStepPlanner(e.planner)
 		prior := make([]plannerStepTrace, 0, e.plannerMaxSteps)
 		var last *plannerStepTrace
+		lastSnapshotSignature := plannerSnapshotSignature(snapshot)
+		snapshotRepeatCount := 0
+		lastActionSignature := ""
+		actionRepeatCount := 0
 
 		for round := 1; round <= e.plannerMaxSteps; round++ {
 			req := plannerStepRequest{
@@ -309,6 +319,13 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 				Round:        round,
 				FailureCount: plannerFailureCount,
 			}
+			actionSignature := plannerActionSignature(sanitized[0])
+			if actionSignature == lastActionSignature {
+				actionRepeatCount++
+			} else {
+				actionRepeatCount = 1
+				lastActionSignature = actionSignature
+			}
 			step, result, flowErr := e.executeActionStep(runCtx, client, len(trace)+1, sanitized[0], trace, plannerMeta)
 			trace = append(trace, step)
 			if flowErr != nil {
@@ -346,6 +363,14 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 			}
 			last = &prior[len(prior)-1]
 
+			if actionRepeatCount >= e.plannerMaxRepeatActions {
+				plannerStopReason = "loop_detected_repeated_action"
+				if trace[len(trace)-1].Planner != nil {
+					trace[len(trace)-1].Planner.StopReason = plannerStopReason
+				}
+				break
+			}
+
 			nextSnapshot, err := capturePageSnapshot(runCtx, client)
 			if err != nil {
 				plannerFailureCount++
@@ -358,6 +383,21 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 					log.Printf("planner snapshot refresh failed (retrying): planner=%s round=%d failures=%d/%d goal=%q err=%v", plannerMode, round, plannerFailureCount, e.plannerMaxFailures, goal, err)
 				}
 				continue
+			}
+
+			nextSignature := plannerSnapshotSignature(nextSnapshot)
+			if nextSignature == lastSnapshotSignature {
+				snapshotRepeatCount++
+			} else {
+				snapshotRepeatCount = 0
+				lastSnapshotSignature = nextSignature
+			}
+			if snapshotRepeatCount >= e.plannerMaxRepeatSnapshots {
+				plannerStopReason = "loop_detected_repeated_snapshot"
+				if trace[len(trace)-1].Planner != nil {
+					trace[len(trace)-1].Planner.StopReason = plannerStopReason
+				}
+				break
 			}
 			snapshot = nextSnapshot
 		}
@@ -524,6 +564,20 @@ func clonePlannerTraceMetadata(meta *plannerTraceMetadata) *plannerTraceMetadata
 	}
 	cloned := *meta
 	return &cloned
+}
+
+func plannerSnapshotSignature(snapshot pageSnapshot) string {
+	parts := []string{
+		trimSnippet(strings.ToLower(strings.TrimSpace(snapshot.URL)), 180),
+		trimSnippet(strings.ToLower(strings.TrimSpace(snapshot.Title)), 140),
+		fmt.Sprintf("%dx%d@%d,%d", snapshot.ViewportWidth, snapshot.ViewportHeight, snapshot.ScrollX, snapshot.ScrollY),
+	}
+	limit := minInt(len(snapshot.Elements), 10)
+	for i := 0; i < limit; i++ {
+		element := snapshot.Elements[i]
+		parts = append(parts, firstNonEmptyString(strings.TrimSpace(element.StableID), strings.TrimSpace(element.Selector)))
+	}
+	return strings.Join(parts, "|")
 }
 
 func captureCurrentURL(ctx context.Context, client *cdp.Client) string {
@@ -1122,30 +1176,32 @@ func loadConfig() config {
 	}
 
 	return config{
-		HTTPAddr:           httpAddr,
-		GRPCAddr:           grpcAddr,
-		NodeID:             nodeID,
-		Version:            envOrDefault("NODE_AGENT_VERSION", "dev"),
-		OrchestratorURL:    strings.TrimSuffix(strings.TrimSpace(os.Getenv("NODE_AGENT_ORCHESTRATOR_URL")), "/"),
-		AdvertiseAddr:      advertise,
-		HeartbeatInterval:  durationOrDefault("NODE_AGENT_HEARTBEAT_INTERVAL", 5*time.Second),
-		RequestTimeout:     durationOrDefault("NODE_AGENT_REQUEST_TIMEOUT", 5*time.Second),
-		CDPBaseURL:         envOrDefault("NODE_AGENT_CDP_BASE_URL", "http://127.0.0.1:9222"),
-		RenderDelay:        durationOrDefault("NODE_AGENT_RENDER_DELAY", 2*time.Second),
-		ExecuteTimeout:     durationOrDefault("NODE_AGENT_EXECUTE_TIMEOUT", 45*time.Second),
-		PlannerMode:        envOrDefault("NODE_AGENT_PLANNER_MODE", "template"),
-		PlannerEndpoint:    strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_ENDPOINT_URL")),
-		PlannerAuthToken:   strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_AUTH_TOKEN")),
-		PlannerModel:       strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_MODEL")),
-		PlannerTimeout:     durationOrDefault("NODE_AGENT_PLANNER_TIMEOUT", 8*time.Second),
-		PlannerMaxElements: intOrDefault("NODE_AGENT_PLANNER_MAX_ELEMENTS", 48),
-		PlannerMaxSteps:    intOrDefault("NODE_AGENT_PLANNER_MAX_STEPS", 12),
-		PlannerMaxFailures: intOrDefault("NODE_AGENT_PLANNER_MAX_FAILURES", 2),
-		TraceScreenshots:   boolOrDefault("NODE_AGENT_TRACE_SCREENSHOTS", false),
-		HumanizeMode:       envOrDefault("NODE_AGENT_HUMANIZE_MODE", "off"),
-		HumanizeSeed:       int64OrDefault("NODE_AGENT_HUMANIZE_SEED", 0),
-		EgressMode:         envOrDefault("NODE_AGENT_EGRESS_MODE", "open"),
-		EgressAllowHosts:   parseCSV(os.Getenv("NODE_AGENT_EGRESS_ALLOW_HOSTS")),
+		HTTPAddr:                  httpAddr,
+		GRPCAddr:                  grpcAddr,
+		NodeID:                    nodeID,
+		Version:                   envOrDefault("NODE_AGENT_VERSION", "dev"),
+		OrchestratorURL:           strings.TrimSuffix(strings.TrimSpace(os.Getenv("NODE_AGENT_ORCHESTRATOR_URL")), "/"),
+		AdvertiseAddr:             advertise,
+		HeartbeatInterval:         durationOrDefault("NODE_AGENT_HEARTBEAT_INTERVAL", 5*time.Second),
+		RequestTimeout:            durationOrDefault("NODE_AGENT_REQUEST_TIMEOUT", 5*time.Second),
+		CDPBaseURL:                envOrDefault("NODE_AGENT_CDP_BASE_URL", "http://127.0.0.1:9222"),
+		RenderDelay:               durationOrDefault("NODE_AGENT_RENDER_DELAY", 2*time.Second),
+		ExecuteTimeout:            durationOrDefault("NODE_AGENT_EXECUTE_TIMEOUT", 45*time.Second),
+		PlannerMode:               envOrDefault("NODE_AGENT_PLANNER_MODE", "template"),
+		PlannerEndpoint:           strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_ENDPOINT_URL")),
+		PlannerAuthToken:          strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_AUTH_TOKEN")),
+		PlannerModel:              strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_MODEL")),
+		PlannerTimeout:            durationOrDefault("NODE_AGENT_PLANNER_TIMEOUT", 8*time.Second),
+		PlannerMaxElements:        intOrDefault("NODE_AGENT_PLANNER_MAX_ELEMENTS", 48),
+		PlannerMaxSteps:           intOrDefault("NODE_AGENT_PLANNER_MAX_STEPS", 12),
+		PlannerMaxFailures:        intOrDefault("NODE_AGENT_PLANNER_MAX_FAILURES", 2),
+		PlannerMaxRepeatActions:   intOrDefault("NODE_AGENT_PLANNER_MAX_REPEAT_ACTIONS", 3),
+		PlannerMaxRepeatSnapshots: intOrDefault("NODE_AGENT_PLANNER_MAX_REPEAT_SNAPSHOTS", 3),
+		TraceScreenshots:          boolOrDefault("NODE_AGENT_TRACE_SCREENSHOTS", false),
+		HumanizeMode:              envOrDefault("NODE_AGENT_HUMANIZE_MODE", "off"),
+		HumanizeSeed:              int64OrDefault("NODE_AGENT_HUMANIZE_SEED", 0),
+		EgressMode:                envOrDefault("NODE_AGENT_EGRESS_MODE", "open"),
+		EgressAllowHosts:          parseCSV(os.Getenv("NODE_AGENT_EGRESS_ALLOW_HOSTS")),
 	}
 }
 
