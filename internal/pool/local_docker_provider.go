@@ -32,6 +32,8 @@ type LocalDockerProviderConfig struct {
 	PlannerModel       string
 	PlannerTimeout     time.Duration
 	PlannerMaxElements int
+	PlannerMaxSteps    int
+	PlannerMaxFailures int
 	TraceScreenshots   bool
 	HumanizeMode       string
 	HumanizeSeed       int64
@@ -92,6 +94,12 @@ func NewLocalDockerProvider(cfg LocalDockerProviderConfig) (*LocalDockerProvider
 	if cfg.PlannerMaxElements <= 0 {
 		cfg.PlannerMaxElements = 48
 	}
+	if cfg.PlannerMaxSteps <= 0 {
+		cfg.PlannerMaxSteps = 12
+	}
+	if cfg.PlannerMaxFailures < 0 {
+		cfg.PlannerMaxFailures = 0
+	}
 	if strings.TrimSpace(cfg.XVFBScreenGeometry) == "" {
 		cfg.XVFBScreenGeometry = "1280x720x24"
 	}
@@ -151,6 +159,8 @@ func (p *LocalDockerProvider) ProvisionNode(ctx context.Context, input Provision
 		"NODE_AGENT_PLANNER_MODE":         p.cfg.PlannerMode,
 		"NODE_AGENT_PLANNER_TIMEOUT":      p.cfg.PlannerTimeout.String(),
 		"NODE_AGENT_PLANNER_MAX_ELEMENTS": fmt.Sprintf("%d", p.cfg.PlannerMaxElements),
+		"NODE_AGENT_PLANNER_MAX_STEPS":    fmt.Sprintf("%d", p.cfg.PlannerMaxSteps),
+		"NODE_AGENT_PLANNER_MAX_FAILURES": fmt.Sprintf("%d", p.cfg.PlannerMaxFailures),
 		"NODE_AGENT_TRACE_SCREENSHOTS":    fmt.Sprintf("%t", p.cfg.TraceScreenshots),
 		"NODE_AGENT_HUMANIZE_MODE":        p.cfg.HumanizeMode,
 		"NODE_AGENT_HUMANIZE_SEED":        fmt.Sprintf("%d", p.cfg.HumanizeSeed),

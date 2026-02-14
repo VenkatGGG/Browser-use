@@ -44,6 +44,8 @@ type config struct {
 	PlannerModel       string
 	PlannerTimeout     time.Duration
 	PlannerMaxElements int
+	PlannerMaxSteps    int
+	PlannerMaxFailures int
 	TraceScreenshots   bool
 	HumanizeMode       string
 	HumanizeSeed       int64
@@ -111,17 +113,25 @@ type executeResponse struct {
 	Trace            []executeTraceStep `json:"trace,omitempty"`
 }
 
+type plannerTraceMetadata struct {
+	Mode         string `json:"mode,omitempty"`
+	Round        int    `json:"round,omitempty"`
+	FailureCount int    `json:"failure_count,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+}
+
 type executeTraceStep struct {
-	Index                 int           `json:"index"`
-	Action                executeAction `json:"action"`
-	Status                string        `json:"status"`
-	Error                 string        `json:"error,omitempty"`
-	OutputText            string        `json:"output_text,omitempty"`
-	StartedAt             time.Time     `json:"started_at,omitempty"`
-	CompletedAt           time.Time     `json:"completed_at,omitempty"`
-	DurationMS            int64         `json:"duration_ms,omitempty"`
-	ScreenshotBase64      string        `json:"screenshot_base64,omitempty"`
-	ScreenshotArtifactURL string        `json:"screenshot_artifact_url,omitempty"`
+	Index                 int                   `json:"index"`
+	Action                executeAction         `json:"action"`
+	Status                string                `json:"status"`
+	Error                 string                `json:"error,omitempty"`
+	OutputText            string                `json:"output_text,omitempty"`
+	StartedAt             time.Time             `json:"started_at,omitempty"`
+	CompletedAt           time.Time             `json:"completed_at,omitempty"`
+	DurationMS            int64                 `json:"duration_ms,omitempty"`
+	ScreenshotBase64      string                `json:"screenshot_base64,omitempty"`
+	ScreenshotArtifactURL string                `json:"screenshot_artifact_url,omitempty"`
+	Planner               *plannerTraceMetadata `json:"planner,omitempty"`
 }
 
 type executeFlowError struct {
@@ -134,15 +144,17 @@ func (e *executeFlowError) Error() string {
 }
 
 type browserExecutor struct {
-	cdpBaseURL       string
-	renderDelay      time.Duration
-	executeTimeout   time.Duration
-	planner          actionPlanner
-	traceScreenshots bool
-	humanizer        *humanizer
-	egressMode       string
-	egressAllowHosts []string
-	mu               sync.Mutex
+	cdpBaseURL         string
+	renderDelay        time.Duration
+	executeTimeout     time.Duration
+	planner            actionPlanner
+	plannerMaxSteps    int
+	plannerMaxFailures int
+	traceScreenshots   bool
+	humanizer          *humanizer
+	egressMode         string
+	egressAllowHosts   []string
+	mu                 sync.Mutex
 }
 
 func newBrowserExecutor(cfg config) *browserExecutor {
@@ -158,10 +170,12 @@ func newBrowserExecutor(cfg config) *browserExecutor {
 			Timeout:     cfg.PlannerTimeout,
 			MaxElements: cfg.PlannerMaxElements,
 		}),
-		traceScreenshots: cfg.TraceScreenshots,
-		humanizer:        newHumanizer(cfg.HumanizeMode, cfg.HumanizeSeed),
-		egressMode:       normalizeEgressMode(cfg.EgressMode),
-		egressAllowHosts: append([]string(nil), cfg.EgressAllowHosts...),
+		plannerMaxSteps:    maxIntValue(cfg.PlannerMaxSteps, 1),
+		plannerMaxFailures: maxIntValue(cfg.PlannerMaxFailures, 0),
+		traceScreenshots:   cfg.TraceScreenshots,
+		humanizer:          newHumanizer(cfg.HumanizeMode, cfg.HumanizeSeed),
+		egressMode:         normalizeEgressMode(cfg.EgressMode),
+		egressAllowHosts:   append([]string(nil), cfg.EgressAllowHosts...),
 	}
 }
 
@@ -232,29 +246,91 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 	}
 
 	executionActions := append([]executeAction(nil), actions...)
+	plannerStopReason := ""
+	plannerFailureCount := 0
+	plannerMode := ""
 	if len(executionActions) == 0 && strings.TrimSpace(goal) != "" && e.planner != nil {
 		snapshot, err := capturePageSnapshot(runCtx, client)
 		if err != nil {
-			if traceID != "" {
-				log.Printf("trace_id=%s goal planning skipped (snapshot failed): goal=%q err=%v", traceID, goal, err)
-			} else {
-				log.Printf("goal planning skipped (snapshot failed): task goal=%q err=%v", goal, err)
-			}
+			return executeResponse{}, fmt.Errorf("goal planning snapshot failed: %w", err)
 		} else {
-			planned, err := e.planner.Plan(runCtx, goal, snapshot)
-			if err != nil {
-				if traceID != "" {
-					log.Printf("trace_id=%s goal planning skipped (planner failed): planner=%s goal=%q err=%v", traceID, e.planner.Name(), goal, err)
-				} else {
-					log.Printf("goal planning skipped (planner failed): planner=%s goal=%q err=%v", e.planner.Name(), goal, err)
+			plannerMode = e.planner.Name()
+			stepPlanner := newStaticStepPlanner(e.planner)
+			prior := make([]plannerStepTrace, 0, e.plannerMaxSteps)
+			var last *plannerStepTrace
+			for round := 1; round <= e.plannerMaxSteps; round++ {
+				req := plannerStepRequest{
+					Goal:             strings.TrimSpace(goal),
+					CurrentURL:       strings.TrimSpace(snapshot.URL),
+					PageSnapshot:     snapshot,
+					PriorSteps:       append([]plannerStepTrace(nil), prior...),
+					LastActionResult: clonePlannerStepTrace(last),
+					AllowedActions:   allowedPlannerActions(),
 				}
-			} else if len(planned) > 0 {
-				executionActions = planned
-				if traceID != "" {
-					log.Printf("trace_id=%s planner=%s generated %d actions for goal=%q actions=%s", traceID, e.planner.Name(), len(planned), goal, summarizeActions(planned))
-				} else {
-					log.Printf("planner=%s generated %d actions for goal=%q actions=%s", e.planner.Name(), len(planned), goal, summarizeActions(planned))
+
+				decision, err := stepPlanner.PlanStep(runCtx, req)
+				if err != nil {
+					plannerFailureCount++
+					if plannerFailureCount > e.plannerMaxFailures {
+						return executeResponse{}, fmt.Errorf("goal planning failed after %d failures: %w", plannerFailureCount, err)
+					}
+					if traceID != "" {
+						log.Printf("trace_id=%s planner round failed (retrying): planner=%s round=%d failures=%d/%d goal=%q err=%v", traceID, plannerMode, round, plannerFailureCount, e.plannerMaxFailures, goal, err)
+					} else {
+						log.Printf("planner round failed (retrying): planner=%s round=%d failures=%d/%d goal=%q err=%v", plannerMode, round, plannerFailureCount, e.plannerMaxFailures, goal, err)
+					}
+					continue
 				}
+
+				if decision.Stop {
+					plannerStopReason = strings.TrimSpace(decision.StopReason)
+					if plannerStopReason == "" {
+						plannerStopReason = "planner_stop"
+					}
+					break
+				}
+
+				if decision.NextAction == nil {
+					plannerStopReason = "planner_no_action"
+					break
+				}
+
+				sanitized := sanitizePlannedActions([]executeAction{*decision.NextAction})
+				if len(sanitized) == 0 {
+					plannerFailureCount++
+					if plannerFailureCount > e.plannerMaxFailures {
+						return executeResponse{}, fmt.Errorf("goal planning returned invalid actions after %d failures", plannerFailureCount)
+					}
+					continue
+				}
+
+				nextAction := sanitized[0]
+				executionActions = append(executionActions, nextAction)
+				planned := plannerStepTrace{
+					Index:      round,
+					Action:     normalizeTraceAction(nextAction),
+					Status:     "planned",
+					OutputText: "",
+				}
+				prior = append(prior, planned)
+				last = &planned
+			}
+
+			if len(executionActions) == e.plannerMaxSteps && plannerStopReason == "" {
+				plannerStopReason = "max_planner_steps_reached"
+			}
+			if len(executionActions) == 0 && plannerStopReason == "" {
+				plannerStopReason = "no_actions"
+			}
+
+			if len(executionActions) > 0 {
+				if traceID != "" {
+					log.Printf("trace_id=%s planner=%s generated %d actions via step contract goal=%q stop_reason=%q failures=%d", traceID, plannerMode, len(executionActions), goal, plannerStopReason, plannerFailureCount)
+				} else {
+					log.Printf("planner=%s generated %d actions via step contract goal=%q stop_reason=%q failures=%d", plannerMode, len(executionActions), goal, plannerStopReason, plannerFailureCount)
+				}
+			} else if traceID != "" {
+				log.Printf("trace_id=%s planner=%s produced no executable actions goal=%q stop_reason=%q failures=%d", traceID, plannerMode, goal, plannerStopReason, plannerFailureCount)
 			}
 		}
 	}
@@ -266,6 +342,16 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 			Action:    normalizeTraceAction(action),
 			Status:    "succeeded",
 			StartedAt: started,
+		}
+		if plannerMode != "" {
+			step.Planner = &plannerTraceMetadata{
+				Mode:         plannerMode,
+				Round:        index + 1,
+				FailureCount: plannerFailureCount,
+			}
+		}
+		if step.Planner != nil && index == len(executionActions)-1 && plannerStopReason != "" {
+			step.Planner.StopReason = plannerStopReason
 		}
 		outputText, err := e.applyAction(runCtx, client, action)
 		if err != nil {
@@ -764,6 +850,14 @@ func normalizeTraceAction(action executeAction) executeAction {
 	}
 }
 
+func clonePlannerStepTrace(step *plannerStepTrace) *plannerStepTrace {
+	if step == nil {
+		return nil
+	}
+	cloned := *step
+	return &cloned
+}
+
 func main() {
 	cfg := loadConfig()
 	executor := newBrowserExecutor(cfg)
@@ -867,6 +961,8 @@ func loadConfig() config {
 		PlannerModel:       strings.TrimSpace(os.Getenv("NODE_AGENT_PLANNER_MODEL")),
 		PlannerTimeout:     durationOrDefault("NODE_AGENT_PLANNER_TIMEOUT", 8*time.Second),
 		PlannerMaxElements: intOrDefault("NODE_AGENT_PLANNER_MAX_ELEMENTS", 48),
+		PlannerMaxSteps:    intOrDefault("NODE_AGENT_PLANNER_MAX_STEPS", 12),
+		PlannerMaxFailures: intOrDefault("NODE_AGENT_PLANNER_MAX_FAILURES", 2),
 		TraceScreenshots:   boolOrDefault("NODE_AGENT_TRACE_SCREENSHOTS", false),
 		HumanizeMode:       envOrDefault("NODE_AGENT_HUMANIZE_MODE", "off"),
 		HumanizeSeed:       int64OrDefault("NODE_AGENT_HUMANIZE_SEED", 0),

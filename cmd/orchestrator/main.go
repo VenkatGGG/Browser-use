@@ -98,6 +98,8 @@ func main() {
 			PlannerModel:       cfg.PoolNodePlannerModel,
 			PlannerTimeout:     cfg.PoolNodePlannerTimeout,
 			PlannerMaxElements: cfg.PoolNodePlannerMaxElements,
+			PlannerMaxSteps:    cfg.PoolNodePlannerMaxSteps,
+			PlannerMaxFailures: cfg.PoolNodePlannerMaxFailures,
 			TraceScreenshots:   cfg.PoolNodeTraceScreenshots,
 			HumanizeMode:       cfg.PoolNodeHumanizeMode,
 			HumanizeSeed:       cfg.PoolNodeHumanizeSeed,

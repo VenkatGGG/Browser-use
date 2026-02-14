@@ -730,9 +730,22 @@ func (r *Runner) mapTaskTraceWithArtifacts(ctx context.Context, taskID string, t
 			DurationMS:            step.DurationMS,
 			ScreenshotBase64:      screenshotBase64,
 			ScreenshotArtifactURL: screenshotArtifactURL,
+			Planner:               mapPlannerTraceMetadata(step.Planner),
 		})
 	}
 	return mapped
+}
+
+func mapPlannerTraceMetadata(meta *nodeclient.PlannerTraceMetadata) *task.PlannerTraceMetadata {
+	if meta == nil {
+		return nil
+	}
+	return &task.PlannerTraceMetadata{
+		Mode:         strings.TrimSpace(meta.Mode),
+		Round:        meta.Round,
+		FailureCount: meta.FailureCount,
+		StopReason:   strings.TrimSpace(meta.StopReason),
+	}
 }
 
 func utcTimePtr(value time.Time) *time.Time {

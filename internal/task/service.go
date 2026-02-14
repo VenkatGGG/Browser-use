@@ -37,16 +37,24 @@ type Action struct {
 }
 
 type StepTrace struct {
-	Index                 int        `json:"index"`
-	Action                Action     `json:"action"`
-	Status                string     `json:"status"`
-	Error                 string     `json:"error,omitempty"`
-	OutputText            string     `json:"output_text,omitempty"`
-	StartedAt             *time.Time `json:"started_at,omitempty"`
-	CompletedAt           *time.Time `json:"completed_at,omitempty"`
-	DurationMS            int64      `json:"duration_ms,omitempty"`
-	ScreenshotBase64      string     `json:"screenshot_base64,omitempty"`
-	ScreenshotArtifactURL string     `json:"screenshot_artifact_url,omitempty"`
+	Index                 int                   `json:"index"`
+	Action                Action                `json:"action"`
+	Status                string                `json:"status"`
+	Error                 string                `json:"error,omitempty"`
+	OutputText            string                `json:"output_text,omitempty"`
+	StartedAt             *time.Time            `json:"started_at,omitempty"`
+	CompletedAt           *time.Time            `json:"completed_at,omitempty"`
+	DurationMS            int64                 `json:"duration_ms,omitempty"`
+	ScreenshotBase64      string                `json:"screenshot_base64,omitempty"`
+	ScreenshotArtifactURL string                `json:"screenshot_artifact_url,omitempty"`
+	Planner               *PlannerTraceMetadata `json:"planner,omitempty"`
+}
+
+type PlannerTraceMetadata struct {
+	Mode         string `json:"mode,omitempty"`
+	Round        int    `json:"round,omitempty"`
+	FailureCount int    `json:"failure_count,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
 }
 
 type Task struct {

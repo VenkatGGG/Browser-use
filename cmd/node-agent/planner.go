@@ -33,6 +33,79 @@ type actionPlanner interface {
 	Plan(ctx context.Context, goal string, snapshot pageSnapshot) ([]executeAction, error)
 }
 
+type plannerStepRequest struct {
+	Goal             string             `json:"goal"`
+	CurrentURL       string             `json:"current_url"`
+	PageSnapshot     pageSnapshot       `json:"page_snapshot"`
+	PriorSteps       []plannerStepTrace `json:"prior_steps,omitempty"`
+	LastActionResult *plannerStepTrace  `json:"last_action_result,omitempty"`
+	AllowedActions   []string           `json:"allowed_actions,omitempty"`
+}
+
+type plannerStepTrace struct {
+	Index      int           `json:"index"`
+	Action     executeAction `json:"action"`
+	Status     string        `json:"status,omitempty"`
+	Error      string        `json:"error,omitempty"`
+	OutputText string        `json:"output_text,omitempty"`
+}
+
+type plannerStepResponse struct {
+	NextAction *executeAction `json:"next_action,omitempty"`
+	Stop       bool           `json:"stop,omitempty"`
+	StopReason string         `json:"stop_reason,omitempty"`
+}
+
+type stepActionPlanner interface {
+	PlanStep(ctx context.Context, input plannerStepRequest) (plannerStepResponse, error)
+}
+
+type staticStepPlanner struct {
+	planner      actionPlanner
+	cached       []executeAction
+	cachedLoaded bool
+}
+
+func newStaticStepPlanner(planner actionPlanner) *staticStepPlanner {
+	return &staticStepPlanner{planner: planner}
+}
+
+func (p *staticStepPlanner) PlanStep(ctx context.Context, input plannerStepRequest) (plannerStepResponse, error) {
+	if p == nil || p.planner == nil {
+		return plannerStepResponse{}, errors.New("planner is not configured")
+	}
+	if !p.cachedLoaded {
+		actions, err := p.planner.Plan(ctx, input.Goal, input.PageSnapshot)
+		if err != nil {
+			return plannerStepResponse{}, err
+		}
+		p.cached = sanitizePlannedActions(actions)
+		p.cachedLoaded = true
+	}
+	if len(p.cached) == 0 {
+		return plannerStepResponse{
+			Stop:       true,
+			StopReason: "no_actions",
+		}, nil
+	}
+
+	offset := len(input.PriorSteps)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(p.cached) {
+		return plannerStepResponse{
+			Stop:       true,
+			StopReason: "plan_exhausted",
+		}, nil
+	}
+
+	next := p.cached[offset]
+	return plannerStepResponse{
+		NextAction: &next,
+	}, nil
+}
+
 type heuristicPlanner struct{}
 type templatePlanner struct {
 	fallback actionPlanner

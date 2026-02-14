@@ -135,6 +135,77 @@ func TestTemplatePlannerFallsBackToHeuristicForSimpleSearch(t *testing.T) {
 	}
 }
 
+func TestStaticStepPlannerSequencesActions(t *testing.T) {
+	t.Parallel()
+
+	basePlanner := &heuristicPlanner{}
+	stepPlanner := newStaticStepPlanner(basePlanner)
+	snapshot := pageSnapshot{
+		URL:   "https://duckduckgo.com",
+		Title: "DuckDuckGo",
+		Elements: []pageElement{
+			{Tag: "input", Type: "search", Name: "q", Selector: "input[name=\"q\"]", Width: 500, Height: 40},
+		},
+	}
+
+	req := plannerStepRequest{
+		Goal:         "search for browser use",
+		CurrentURL:   snapshot.URL,
+		PageSnapshot: snapshot,
+	}
+	first, err := stepPlanner.PlanStep(context.Background(), req)
+	if err != nil {
+		t.Fatalf("PlanStep first returned error: %v", err)
+	}
+	if first.Stop || first.NextAction == nil || first.NextAction.Type != "wait_for" {
+		t.Fatalf("unexpected first step decision: %+v", first)
+	}
+
+	req.PriorSteps = append(req.PriorSteps, plannerStepTrace{
+		Index:  1,
+		Action: *first.NextAction,
+		Status: "planned",
+	})
+	second, err := stepPlanner.PlanStep(context.Background(), req)
+	if err != nil {
+		t.Fatalf("PlanStep second returned error: %v", err)
+	}
+	if second.Stop || second.NextAction == nil || second.NextAction.Type != "type" {
+		t.Fatalf("unexpected second step decision: %+v", second)
+	}
+
+	req.PriorSteps = append(req.PriorSteps,
+		plannerStepTrace{Index: 2, Action: *second.NextAction, Status: "planned"},
+		plannerStepTrace{Index: 3, Action: executeAction{Type: "press_enter", Selector: "input[name=\"q\"]"}, Status: "planned"},
+		plannerStepTrace{Index: 4, Action: executeAction{Type: "wait_for_url_contains", Text: "browser use"}, Status: "planned"},
+		plannerStepTrace{Index: 5, Action: executeAction{Type: "wait", DelayMS: 800}, Status: "planned"},
+	)
+	exhausted, err := stepPlanner.PlanStep(context.Background(), req)
+	if err != nil {
+		t.Fatalf("PlanStep exhausted returned error: %v", err)
+	}
+	if !exhausted.Stop || exhausted.StopReason != "plan_exhausted" {
+		t.Fatalf("expected plan_exhausted stop, got %+v", exhausted)
+	}
+}
+
+func TestStaticStepPlannerStopsWhenNoActions(t *testing.T) {
+	t.Parallel()
+
+	stepPlanner := newStaticStepPlanner(&heuristicPlanner{})
+	decision, err := stepPlanner.PlanStep(context.Background(), plannerStepRequest{
+		Goal:         "open homepage",
+		CurrentURL:   "https://example.com",
+		PageSnapshot: pageSnapshot{URL: "https://example.com"},
+	})
+	if err != nil {
+		t.Fatalf("PlanStep returned error: %v", err)
+	}
+	if !decision.Stop || decision.StopReason != "no_actions" {
+		t.Fatalf("expected no_actions stop, got %+v", decision)
+	}
+}
+
 func TestBestSelectorForElementPriority(t *testing.T) {
 	t.Parallel()
 

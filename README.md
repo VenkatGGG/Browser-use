@@ -439,6 +439,8 @@ Goal: move from one-shot planning to a closed loop where the planner observes ac
 | `NODE_AGENT_PLANNER_ENDPOINT_URL` | LLM endpoint URL | OpenAI default |
 | `NODE_AGENT_PLANNER_TIMEOUT` | Planner request timeout | `30s` |
 | `NODE_AGENT_PLANNER_MAX_ELEMENTS` | Max DOM elements sent to planner | `50` |
+| `NODE_AGENT_PLANNER_MAX_STEPS` | Max planner-produced actions per task | `12` |
+| `NODE_AGENT_PLANNER_MAX_FAILURES` | Planner retry budget before failing planning | `2` |
 | `NODE_AGENT_TRACE_SCREENSHOTS` | Enable per-step trace screenshots | `false` |
 
 ---
@@ -563,6 +565,7 @@ browser-use/
 - Sessions and task state are persisted in PostgreSQL. Queued tasks are reconciled from the database on runner startup.
 - Task responses include `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payloads include `attempt`, `max_retries`, `next_retry_at`, `trace`, and `extracted_outputs`.
+- Task trace steps now include planner metadata (`planner.mode`, `planner.round`, `planner.failure_count`, `planner.stop_reason`) for phase-0 re-planning observability.
 - Dashboard task submission now auto-creates a session when `session_id` is omitted, using `tenant_id` if provided.
 - The `POST /task` convenience endpoint waits for task completion by default. Use `POST /v1/tasks` for async queuing.
 - `X-Trace-Id: trc_<task_id>` is returned in task creation responses for log correlation.

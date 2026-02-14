@@ -220,6 +220,24 @@ func (l *leaseLossLeaser) Release(ctx context.Context, resource, owner string, t
 	return l.base.Release(ctx, resource, owner, token)
 }
 
+func TestMapPlannerTraceMetadata(t *testing.T) {
+	meta := mapPlannerTraceMetadata(&nodeclient.PlannerTraceMetadata{
+		Mode:         "template",
+		Round:        3,
+		FailureCount: 1,
+		StopReason:   "plan_exhausted",
+	})
+	if meta == nil {
+		t.Fatalf("expected non-nil planner metadata")
+	}
+	if meta.Mode != "template" || meta.Round != 3 || meta.FailureCount != 1 || meta.StopReason != "plan_exhausted" {
+		t.Fatalf("unexpected mapped planner metadata: %+v", meta)
+	}
+	if got := mapPlannerTraceMetadata(nil); got != nil {
+		t.Fatalf("expected nil mapping for nil metadata input")
+	}
+}
+
 func TestRunnerRetriesTransientFailures(t *testing.T) {
 	taskSvc := task.NewInMemoryService()
 	nodes := pool.NewInMemoryRegistry()

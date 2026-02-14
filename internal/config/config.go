@@ -52,6 +52,8 @@ type Config struct {
 	PoolNodePlannerModel       string
 	PoolNodePlannerTimeout     time.Duration
 	PoolNodePlannerMaxElements int
+	PoolNodePlannerMaxSteps    int
+	PoolNodePlannerMaxFailures int
 	PoolNodeTraceScreenshots   bool
 	PoolNodeHumanizeMode       string
 	PoolNodeHumanizeSeed       int64
@@ -106,6 +108,8 @@ func Load() Config {
 		PoolNodePlannerModel:       strings.TrimSpace(os.Getenv("ORCHESTRATOR_POOL_NODE_PLANNER_MODEL")),
 		PoolNodePlannerTimeout:     durationOrDefault("ORCHESTRATOR_POOL_NODE_PLANNER_TIMEOUT", 8*time.Second),
 		PoolNodePlannerMaxElements: intOrDefault("ORCHESTRATOR_POOL_NODE_PLANNER_MAX_ELEMENTS", 48),
+		PoolNodePlannerMaxSteps:    intOrDefault("ORCHESTRATOR_POOL_NODE_PLANNER_MAX_STEPS", 12),
+		PoolNodePlannerMaxFailures: intOrDefault("ORCHESTRATOR_POOL_NODE_PLANNER_MAX_FAILURES", 2),
 		PoolNodeTraceScreenshots:   boolOrDefault("ORCHESTRATOR_POOL_NODE_TRACE_SCREENSHOTS", false),
 		PoolNodeHumanizeMode:       envOrDefault("ORCHESTRATOR_POOL_NODE_HUMANIZE_MODE", "off"),
 		PoolNodeHumanizeSeed:       int64OrDefault("ORCHESTRATOR_POOL_NODE_HUMANIZE_SEED", 0),
