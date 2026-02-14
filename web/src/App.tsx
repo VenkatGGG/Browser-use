@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelTask,
-  createSession,
   createTask,
   fetchDirectReplays,
   fetchNodes,
@@ -148,7 +147,6 @@ export function App() {
   const queryClient = useQueryClient();
   const ui = useAppSelector((state) => state.ui);
   const [tenantID, setTenantID] = useState("dashboard");
-  const [sessionID, setSessionID] = useState("");
   const [taskURL, setTaskURL] = useState("https://duckduckgo.com");
   const [taskGoal, setTaskGoal] = useState("search for browser use");
   const [taskRetries, setTaskRetries] = useState(1);
@@ -204,21 +202,11 @@ export function App() {
       void queryClient.invalidateQueries({ queryKey: ["nodes"] });
     }
   });
-  const createSessionMutation = useMutation({
-    mutationFn: (tenant: string) => createSession(tenant),
-    onSuccess: (session) => {
-      setSessionID(session.id);
-      setComposeStatus(`Created session ${session.id}`);
-    },
-    onError: (error) => {
-      setComposeStatus(`Create session failed: ${(error as Error).message}`);
-    }
-  });
   const createTaskMutation = useMutation({
     mutationFn: createTask,
     onSuccess: (created) => {
       dispatch(setSelectedTaskID(created.id));
-      setComposeStatus(`Queued task ${created.id} (${created.status}).`);
+      setComposeStatus(`Queued task ${created.id} (${created.status}) with session ${created.session_id}.`);
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       void queryClient.invalidateQueries({ queryKey: ["task-stats"] });
     },
@@ -310,14 +298,6 @@ export function App() {
     [tasks]
   );
 
-  async function ensureSession(): Promise<string> {
-    const existing = sessionID.trim();
-    if (existing) return existing;
-    const created = await createSession(tenantID.trim() || "dashboard");
-    setSessionID(created.id);
-    return created.id;
-  }
-
   async function onSubmitTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const url = taskURL.trim();
@@ -340,18 +320,13 @@ export function App() {
         return;
       }
     }
-    try {
-      const sid = await ensureSession();
-      createTaskMutation.mutate({
-        session_id: sid,
-        url,
-        goal,
-        max_retries: taskRetries,
-        actions
-      });
-    } catch (error) {
-      setComposeStatus(`Task queue failed: ${(error as Error).message}`);
-    }
+    createTaskMutation.mutate({
+      tenant_id: tenantID.trim() || "dashboard",
+      url,
+      goal,
+      max_retries: taskRetries,
+      actions
+    });
   }
 
   return (
@@ -449,19 +424,7 @@ export function App() {
             Tenant ID
             <input value={tenantID} onChange={(e) => setTenantID(e.target.value)} />
           </label>
-          <div className="sessionRow">
-            <label>
-              Session ID
-              <input value={sessionID} onChange={(e) => setSessionID(e.target.value)} placeholder="sess_..." />
-            </label>
-            <button
-              type="button"
-              onClick={() => createSessionMutation.mutate(tenantID.trim() || "dashboard")}
-              disabled={createSessionMutation.isPending}
-            >
-              {createSessionMutation.isPending ? "Creating..." : "Create Session"}
-            </button>
-          </div>
+          <p className="composeHint">A new session is auto-created for each queued task.</p>
           <label>
             URL
             <input value={taskURL} onChange={(e) => setTaskURL(e.target.value)} />
@@ -755,4 +718,3 @@ export function App() {
     </main>
   );
 }
-

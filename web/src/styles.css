@@ -135,11 +135,10 @@ body {
   resize: vertical;
 }
 
-.sessionRow {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: end;
+.composeHint {
+  margin: 0;
+  font-size: 12px;
+  color: #56666e;
 }
 
 .composeStatus {

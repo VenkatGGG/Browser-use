@@ -62,6 +62,8 @@ describe("App smoke tests", () => {
     expect(within(composeSection).getByText("Tenant ID")).toBeDefined();
     expect(within(composeSection).getByText("URL")).toBeDefined();
     expect(within(composeSection).getByText("Goal")).toBeDefined();
+    expect(within(composeSection).queryByText("Session ID")).toBeNull();
+    expect(within(composeSection).queryByRole("button", { name: /Create Session/i })).toBeNull();
     expect(within(composeSection).getByRole("button", { name: /Queue Task/i })).toBeDefined();
   });
 

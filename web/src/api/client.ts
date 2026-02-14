@@ -72,7 +72,8 @@ export async function createSession(tenantID: string): Promise<SessionItem> {
 }
 
 export async function createTask(input: {
-  session_id: string;
+  session_id?: string;
+  tenant_id?: string;
   url: string;
   goal: string;
   max_retries?: number;
@@ -84,4 +85,3 @@ export async function createTask(input: {
     body: JSON.stringify(input)
   });
 }
-
