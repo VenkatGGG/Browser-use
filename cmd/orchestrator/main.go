@@ -99,6 +99,8 @@ func main() {
 			PlannerTimeout:     cfg.PoolNodePlannerTimeout,
 			PlannerMaxElements: cfg.PoolNodePlannerMaxElements,
 			TraceScreenshots:   cfg.PoolNodeTraceScreenshots,
+			HumanizeMode:       cfg.PoolNodeHumanizeMode,
+			HumanizeSeed:       cfg.PoolNodeHumanizeSeed,
 			EgressMode:         cfg.PoolNodeEgressMode,
 			EgressAllowHosts:   cfg.PoolNodeEgressAllowHosts,
 			SeccompProfile:     cfg.PoolNodeSeccompProfile,

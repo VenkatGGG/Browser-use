@@ -53,6 +53,8 @@ type Config struct {
 	PoolNodePlannerTimeout     time.Duration
 	PoolNodePlannerMaxElements int
 	PoolNodeTraceScreenshots   bool
+	PoolNodeHumanizeMode       string
+	PoolNodeHumanizeSeed       int64
 	PoolNodeEgressMode         string
 	PoolNodeEgressAllowHosts   string
 	PoolNodeSeccompProfile     string
@@ -105,6 +107,8 @@ func Load() Config {
 		PoolNodePlannerTimeout:     durationOrDefault("ORCHESTRATOR_POOL_NODE_PLANNER_TIMEOUT", 8*time.Second),
 		PoolNodePlannerMaxElements: intOrDefault("ORCHESTRATOR_POOL_NODE_PLANNER_MAX_ELEMENTS", 48),
 		PoolNodeTraceScreenshots:   boolOrDefault("ORCHESTRATOR_POOL_NODE_TRACE_SCREENSHOTS", false),
+		PoolNodeHumanizeMode:       envOrDefault("ORCHESTRATOR_POOL_NODE_HUMANIZE_MODE", "off"),
+		PoolNodeHumanizeSeed:       int64OrDefault("ORCHESTRATOR_POOL_NODE_HUMANIZE_SEED", 0),
 		PoolNodeEgressMode:         envOrDefault("ORCHESTRATOR_POOL_NODE_EGRESS_MODE", "open"),
 		PoolNodeEgressAllowHosts:   strings.TrimSpace(os.Getenv("ORCHESTRATOR_POOL_NODE_EGRESS_ALLOW_HOSTS")),
 		PoolNodeSeccompProfile:     envOrDefault("ORCHESTRATOR_POOL_NODE_SECCOMP_PROFILE", "default"),
@@ -138,6 +142,18 @@ func intOrDefault(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func int64OrDefault(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return fallback
 	}

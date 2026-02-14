@@ -33,6 +33,8 @@ type LocalDockerProviderConfig struct {
 	PlannerTimeout     time.Duration
 	PlannerMaxElements int
 	TraceScreenshots   bool
+	HumanizeMode       string
+	HumanizeSeed       int64
 	EgressMode         string
 	EgressAllowHosts   string
 	SeccompProfile     string
@@ -96,6 +98,9 @@ func NewLocalDockerProvider(cfg LocalDockerProviderConfig) (*LocalDockerProvider
 	if strings.TrimSpace(cfg.EgressMode) == "" {
 		cfg.EgressMode = "open"
 	}
+	if strings.TrimSpace(cfg.HumanizeMode) == "" {
+		cfg.HumanizeMode = "off"
+	}
 	cfg.EgressMode = strings.ToLower(strings.TrimSpace(cfg.EgressMode))
 	switch cfg.EgressMode {
 	case "open", "public_only", "deny_all":
@@ -147,6 +152,8 @@ func (p *LocalDockerProvider) ProvisionNode(ctx context.Context, input Provision
 		"NODE_AGENT_PLANNER_TIMEOUT":      p.cfg.PlannerTimeout.String(),
 		"NODE_AGENT_PLANNER_MAX_ELEMENTS": fmt.Sprintf("%d", p.cfg.PlannerMaxElements),
 		"NODE_AGENT_TRACE_SCREENSHOTS":    fmt.Sprintf("%t", p.cfg.TraceScreenshots),
+		"NODE_AGENT_HUMANIZE_MODE":        p.cfg.HumanizeMode,
+		"NODE_AGENT_HUMANIZE_SEED":        fmt.Sprintf("%d", p.cfg.HumanizeSeed),
 		"NODE_AGENT_EGRESS_MODE":          p.cfg.EgressMode,
 		"CHROME_DEBUG_PORT":               fmt.Sprintf("%d", p.cfg.ChromeDebugPort),
 		"XVFB_SCREEN_GEOMETRY":            p.cfg.XVFBScreenGeometry,

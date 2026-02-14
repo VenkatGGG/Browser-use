@@ -395,6 +395,8 @@ NODE_AGENT_PLANNER_ENDPOINT_URL=https://generativelanguage.googleapis.com/v1beta
 | `NODE_AGENT_PLANNER_TIMEOUT` | Planner request timeout | `30s` |
 | `NODE_AGENT_PLANNER_MAX_ELEMENTS` | Max DOM elements sent to planner | `50` |
 | `NODE_AGENT_TRACE_SCREENSHOTS` | Enable per-step trace screenshots | `false` |
+| `NODE_AGENT_HUMANIZE_MODE` | Human-like interaction mode: `off`, `balanced`, `aggressive` | `off` |
+| `NODE_AGENT_HUMANIZE_SEED` | Optional fixed random seed for reproducible motion | `0` |
 
 ---
 
@@ -520,6 +522,7 @@ browser-use/
 - Sessions and task state are persisted in PostgreSQL. Queued tasks are reconciled from the database on runner startup.
 - Task responses include `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payloads include `attempt`, `max_retries`, `next_retry_at`, `trace`, and `extracted_outputs`.
+- Optional humanized action execution is available for `click`, `type`, and `scroll` using cursor paths, jitter, typing cadence, and scroll burst dynamics.
 - The `POST /task` convenience endpoint waits for task completion by default. Use `POST /v1/tasks` for async queuing.
 - `X-Trace-Id: trc_<task_id>` is returned in task creation responses for log correlation.
 - API key authentication is optional. Set `ORCHESTRATOR_API_KEY` and send via `X-API-Key` or `Authorization: Bearer <key>`.
