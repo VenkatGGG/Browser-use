@@ -245,172 +245,143 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 		return response, nil
 	}
 
-	executionActions := append([]executeAction(nil), actions...)
 	plannerStopReason := ""
 	plannerFailureCount := 0
 	plannerMode := ""
-	if len(executionActions) == 0 && strings.TrimSpace(goal) != "" && e.planner != nil {
+	if len(actions) == 0 && strings.TrimSpace(goal) != "" && e.planner != nil {
 		snapshot, err := capturePageSnapshot(runCtx, client)
 		if err != nil {
 			return executeResponse{}, fmt.Errorf("goal planning snapshot failed: %w", err)
-		} else {
-			plannerMode = e.planner.Name()
-			stepPlanner := newStaticStepPlanner(e.planner)
-			prior := make([]plannerStepTrace, 0, e.plannerMaxSteps)
-			var last *plannerStepTrace
-			for round := 1; round <= e.plannerMaxSteps; round++ {
-				req := plannerStepRequest{
-					Goal:             strings.TrimSpace(goal),
-					CurrentURL:       strings.TrimSpace(snapshot.URL),
-					PageSnapshot:     snapshot,
-					PriorSteps:       append([]plannerStepTrace(nil), prior...),
-					LastActionResult: clonePlannerStepTrace(last),
-					AllowedActions:   allowedPlannerActions(),
-				}
+		}
 
-				decision, err := stepPlanner.PlanStep(runCtx, req)
-				if err != nil {
-					plannerFailureCount++
-					if plannerFailureCount > e.plannerMaxFailures {
-						return executeResponse{}, fmt.Errorf("goal planning failed after %d failures: %w", plannerFailureCount, err)
-					}
-					if traceID != "" {
-						log.Printf("trace_id=%s planner round failed (retrying): planner=%s round=%d failures=%d/%d goal=%q err=%v", traceID, plannerMode, round, plannerFailureCount, e.plannerMaxFailures, goal, err)
-					} else {
-						log.Printf("planner round failed (retrying): planner=%s round=%d failures=%d/%d goal=%q err=%v", plannerMode, round, plannerFailureCount, e.plannerMaxFailures, goal, err)
-					}
-					continue
-				}
+		plannerMode = e.planner.Name()
+		stepPlanner := newStaticStepPlanner(e.planner)
+		prior := make([]plannerStepTrace, 0, e.plannerMaxSteps)
+		var last *plannerStepTrace
 
-				if decision.Stop {
-					plannerStopReason = strings.TrimSpace(decision.StopReason)
-					if plannerStopReason == "" {
-						plannerStopReason = "planner_stop"
-					}
-					break
-				}
-
-				if decision.NextAction == nil {
-					plannerStopReason = "planner_no_action"
-					break
-				}
-
-				sanitized := sanitizePlannedActions([]executeAction{*decision.NextAction})
-				if len(sanitized) == 0 {
-					plannerFailureCount++
-					if plannerFailureCount > e.plannerMaxFailures {
-						return executeResponse{}, fmt.Errorf("goal planning returned invalid actions after %d failures", plannerFailureCount)
-					}
-					continue
-				}
-
-				nextAction := sanitized[0]
-				executionActions = append(executionActions, nextAction)
-				planned := plannerStepTrace{
-					Index:      round,
-					Action:     normalizeTraceAction(nextAction),
-					Status:     "planned",
-					OutputText: "",
-				}
-				prior = append(prior, planned)
-				last = &planned
+		for round := 1; round <= e.plannerMaxSteps; round++ {
+			req := plannerStepRequest{
+				Goal:             strings.TrimSpace(goal),
+				CurrentURL:       strings.TrimSpace(snapshot.URL),
+				PageSnapshot:     snapshot,
+				PriorSteps:       append([]plannerStepTrace(nil), prior...),
+				LastActionResult: clonePlannerStepTrace(last),
+				AllowedActions:   allowedPlannerActions(),
 			}
 
-			if len(executionActions) == e.plannerMaxSteps && plannerStopReason == "" {
-				plannerStopReason = "max_planner_steps_reached"
-			}
-			if len(executionActions) == 0 && plannerStopReason == "" {
-				plannerStopReason = "no_actions"
-			}
-
-			if len(executionActions) > 0 {
+			decision, err := stepPlanner.PlanStep(runCtx, req)
+			if err != nil {
+				plannerFailureCount++
+				if plannerFailureCount > e.plannerMaxFailures {
+					return executeResponse{}, fmt.Errorf("goal planning failed after %d failures: %w", plannerFailureCount, err)
+				}
 				if traceID != "" {
-					log.Printf("trace_id=%s planner=%s generated %d actions via step contract goal=%q stop_reason=%q failures=%d", traceID, plannerMode, len(executionActions), goal, plannerStopReason, plannerFailureCount)
+					log.Printf("trace_id=%s planner round failed (retrying): planner=%s round=%d failures=%d/%d goal=%q err=%v", traceID, plannerMode, round, plannerFailureCount, e.plannerMaxFailures, goal, err)
 				} else {
-					log.Printf("planner=%s generated %d actions via step contract goal=%q stop_reason=%q failures=%d", plannerMode, len(executionActions), goal, plannerStopReason, plannerFailureCount)
+					log.Printf("planner round failed (retrying): planner=%s round=%d failures=%d/%d goal=%q err=%v", plannerMode, round, plannerFailureCount, e.plannerMaxFailures, goal, err)
 				}
-			} else if traceID != "" {
-				log.Printf("trace_id=%s planner=%s produced no executable actions goal=%q stop_reason=%q failures=%d", traceID, plannerMode, goal, plannerStopReason, plannerFailureCount)
+				continue
 			}
-		}
-	}
 
-	for index, action := range executionActions {
-		started := time.Now().UTC()
-		step := executeTraceStep{
-			Index:     index + 1,
-			Action:    normalizeTraceAction(action),
-			Status:    "succeeded",
-			StartedAt: started,
-		}
-		if plannerMode != "" {
-			step.Planner = &plannerTraceMetadata{
+			if decision.Stop {
+				plannerStopReason = strings.TrimSpace(decision.StopReason)
+				if plannerStopReason == "" {
+					plannerStopReason = "planner_stop"
+				}
+				break
+			}
+			if decision.NextAction == nil {
+				plannerStopReason = "planner_no_action"
+				break
+			}
+
+			sanitized := sanitizePlannedActions([]executeAction{*decision.NextAction})
+			if len(sanitized) == 0 {
+				plannerFailureCount++
+				if plannerFailureCount > e.plannerMaxFailures {
+					return executeResponse{}, fmt.Errorf("goal planning returned invalid actions after %d failures", plannerFailureCount)
+				}
+				continue
+			}
+
+			plannerMeta := &plannerTraceMetadata{
 				Mode:         plannerMode,
-				Round:        index + 1,
+				Round:        round,
 				FailureCount: plannerFailureCount,
 			}
-		}
-		if step.Planner != nil && index == len(executionActions)-1 && plannerStopReason != "" {
-			step.Planner.StopReason = plannerStopReason
-		}
-		outputText, err := e.applyAction(runCtx, client, action)
-		if err != nil {
-			finished := time.Now().UTC()
-			step.Status = "failed"
-			step.Error = err.Error()
-			step.CompletedAt = finished
-			step.DurationMS = finished.Sub(started).Milliseconds()
-			if screenshot, shotErr := client.CaptureScreenshot(runCtx); shotErr == nil {
-				step.ScreenshotBase64 = screenshot
-			}
+			step, flowErr := e.executeActionStep(runCtx, client, len(trace)+1, sanitized[0], trace, plannerMeta)
 			trace = append(trace, step)
-
-			partial := executeResponse{
-				Trace: append([]executeTraceStep(nil), trace...),
-			}
-			if title, evalErr := client.EvaluateString(runCtx, "document.title"); evalErr == nil {
-				partial.PageTitle = title
-			}
-			if finalURL, evalErr := client.EvaluateString(runCtx, "window.location.href"); evalErr == nil {
-				partial.FinalURL = finalURL
-			}
-			if screenshot, shotErr := client.CaptureScreenshot(runCtx); shotErr == nil {
-				partial.ScreenshotBase64 = screenshot
-				if traceIdx := len(trace) - 1; traceIdx >= 0 && strings.TrimSpace(trace[traceIdx].ScreenshotBase64) == "" {
-					trace[traceIdx].ScreenshotBase64 = screenshot
-					partial.Trace = append([]executeTraceStep(nil), trace...)
+			if flowErr != nil {
+				if trace[len(trace)-1].Planner != nil {
+					trace[len(trace)-1].Planner.StopReason = "action_failed"
+					flowErr.result.Trace = append([]executeTraceStep(nil), trace...)
 				}
+				return flowErr.result, flowErr
 			}
-			return partial, &executeFlowError{
-				message: fmt.Sprintf("action %d (%s) failed: %v", index+1, action.Type, err),
-				result:  partial,
+
+			executed := plannerStepTrace{
+				Index:      round,
+				Action:     trace[len(trace)-1].Action,
+				Status:     trace[len(trace)-1].Status,
+				Error:      trace[len(trace)-1].Error,
+				OutputText: trace[len(trace)-1].OutputText,
+			}
+			prior = append(prior, executed)
+			last = &executed
+
+			if blocked, response := e.detectBlocker(runCtx, client); blocked {
+				plannerStopReason = "blocker_detected"
+				if trace[len(trace)-1].Planner != nil {
+					trace[len(trace)-1].Planner.StopReason = plannerStopReason
+				}
+				response.Trace = append([]executeTraceStep(nil), trace...)
+				return response, nil
+			}
+
+			nextSnapshot, err := capturePageSnapshot(runCtx, client)
+			if err != nil {
+				plannerFailureCount++
+				if plannerFailureCount > e.plannerMaxFailures {
+					return executeResponse{}, fmt.Errorf("goal planning snapshot refresh failed after %d failures: %w", plannerFailureCount, err)
+				}
+				if traceID != "" {
+					log.Printf("trace_id=%s planner snapshot refresh failed (retrying): planner=%s round=%d failures=%d/%d goal=%q err=%v", traceID, plannerMode, round, plannerFailureCount, e.plannerMaxFailures, goal, err)
+				} else {
+					log.Printf("planner snapshot refresh failed (retrying): planner=%s round=%d failures=%d/%d goal=%q err=%v", plannerMode, round, plannerFailureCount, e.plannerMaxFailures, goal, err)
+				}
+				continue
+			}
+			snapshot = nextSnapshot
+		}
+
+		if len(trace) >= e.plannerMaxSteps && plannerStopReason == "" {
+			plannerStopReason = "max_planner_steps_reached"
+		}
+		if len(trace) == 0 && plannerStopReason == "" {
+			plannerStopReason = "no_actions"
+		}
+		if len(trace) > 0 && plannerStopReason != "" && trace[len(trace)-1].Planner != nil {
+			trace[len(trace)-1].Planner.StopReason = plannerStopReason
+		}
+
+		if len(trace) > 0 {
+			if traceID != "" {
+				log.Printf("trace_id=%s planner=%s executed %d rounds goal=%q stop_reason=%q failures=%d", traceID, plannerMode, len(trace), goal, plannerStopReason, plannerFailureCount)
+			} else {
+				log.Printf("planner=%s executed %d rounds goal=%q stop_reason=%q failures=%d", plannerMode, len(trace), goal, plannerStopReason, plannerFailureCount)
+			}
+		} else if traceID != "" {
+			log.Printf("trace_id=%s planner=%s produced no executable actions goal=%q stop_reason=%q failures=%d", traceID, plannerMode, goal, plannerStopReason, plannerFailureCount)
+		}
+	} else {
+		executionActions := append([]executeAction(nil), actions...)
+		for index, action := range executionActions {
+			step, flowErr := e.executeActionStep(runCtx, client, index+1, action, trace, nil)
+			trace = append(trace, step)
+			if flowErr != nil {
+				return flowErr.result, flowErr
 			}
 		}
-		finished := time.Now().UTC()
-		step.CompletedAt = finished
-		step.DurationMS = finished.Sub(started).Milliseconds()
-		step.OutputText = strings.TrimSpace(outputText)
-		if currentURL, evalErr := client.EvaluateString(runCtx, "window.location.href"); evalErr == nil {
-			if policyErr := validateEgressTarget(runCtx, currentURL, e.egressMode, e.egressAllowHosts); policyErr != nil {
-				step.Status = "failed"
-				step.Error = policyErr.Error()
-				trace = append(trace, step)
-				return executeResponse{
-						Trace: append([]executeTraceStep(nil), trace...),
-					}, &executeFlowError{
-						message: fmt.Sprintf("action %d (%s) failed: %v", index+1, action.Type, policyErr),
-						result: executeResponse{
-							Trace: append([]executeTraceStep(nil), trace...),
-						},
-					}
-			}
-		}
-		if e.traceScreenshots {
-			if screenshot, shotErr := client.CaptureScreenshot(runCtx); shotErr == nil {
-				step.ScreenshotBase64 = screenshot
-			}
-		}
-		trace = append(trace, step)
 	}
 
 	if blocked, response := e.detectBlocker(runCtx, client); blocked {
@@ -437,6 +408,91 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 		ScreenshotBase64: screenshot,
 		Trace:            append([]executeTraceStep(nil), trace...),
 	}, nil
+}
+
+func (e *browserExecutor) executeActionStep(ctx context.Context, client *cdp.Client, index int, action executeAction, trace []executeTraceStep, planner *plannerTraceMetadata) (executeTraceStep, *executeFlowError) {
+	started := time.Now().UTC()
+	step := executeTraceStep{
+		Index:     index,
+		Action:    normalizeTraceAction(action),
+		Status:    "succeeded",
+		StartedAt: started,
+		Planner:   clonePlannerTraceMetadata(planner),
+	}
+
+	outputText, err := e.applyAction(ctx, client, action)
+	if err != nil {
+		finished := time.Now().UTC()
+		step.Status = "failed"
+		step.Error = err.Error()
+		step.CompletedAt = finished
+		step.DurationMS = finished.Sub(started).Milliseconds()
+		if screenshot, shotErr := client.CaptureScreenshot(ctx); shotErr == nil {
+			step.ScreenshotBase64 = screenshot
+		}
+		traceWithStep := append(append([]executeTraceStep(nil), trace...), step)
+		partial := e.buildPartialExecuteResponse(ctx, client, traceWithStep)
+		return step, &executeFlowError{
+			message: fmt.Sprintf("action %d (%s) failed: %v", index, action.Type, err),
+			result:  partial,
+		}
+	}
+
+	finished := time.Now().UTC()
+	step.CompletedAt = finished
+	step.DurationMS = finished.Sub(started).Milliseconds()
+	step.OutputText = strings.TrimSpace(outputText)
+
+	if currentURL, evalErr := client.EvaluateString(ctx, "window.location.href"); evalErr == nil {
+		if policyErr := validateEgressTarget(ctx, currentURL, e.egressMode, e.egressAllowHosts); policyErr != nil {
+			step.Status = "failed"
+			step.Error = policyErr.Error()
+			traceWithStep := append(append([]executeTraceStep(nil), trace...), step)
+			partial := e.buildPartialExecuteResponse(ctx, client, traceWithStep)
+			return step, &executeFlowError{
+				message: fmt.Sprintf("action %d (%s) failed: %v", index, action.Type, policyErr),
+				result:  partial,
+			}
+		}
+	}
+
+	if e.traceScreenshots {
+		if screenshot, shotErr := client.CaptureScreenshot(ctx); shotErr == nil {
+			step.ScreenshotBase64 = screenshot
+		}
+	}
+
+	return step, nil
+}
+
+func (e *browserExecutor) buildPartialExecuteResponse(ctx context.Context, client *cdp.Client, trace []executeTraceStep) executeResponse {
+	partial := executeResponse{
+		Trace: append([]executeTraceStep(nil), trace...),
+	}
+	if title, err := client.EvaluateString(ctx, "document.title"); err == nil {
+		partial.PageTitle = title
+	}
+	if finalURL, err := client.EvaluateString(ctx, "window.location.href"); err == nil {
+		partial.FinalURL = finalURL
+	}
+	if screenshot, err := client.CaptureScreenshot(ctx); err == nil {
+		partial.ScreenshotBase64 = screenshot
+		if len(partial.Trace) > 0 {
+			lastIndex := len(partial.Trace) - 1
+			if strings.TrimSpace(partial.Trace[lastIndex].ScreenshotBase64) == "" {
+				partial.Trace[lastIndex].ScreenshotBase64 = screenshot
+			}
+		}
+	}
+	return partial
+}
+
+func clonePlannerTraceMetadata(meta *plannerTraceMetadata) *plannerTraceMetadata {
+	if meta == nil {
+		return nil
+	}
+	cloned := *meta
+	return &cloned
 }
 
 func (e *browserExecutor) detectBlocker(ctx context.Context, client *cdp.Client) (bool, executeResponse) {

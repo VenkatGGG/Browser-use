@@ -61,9 +61,7 @@ type stepActionPlanner interface {
 }
 
 type staticStepPlanner struct {
-	planner      actionPlanner
-	cached       []executeAction
-	cachedLoaded bool
+	planner actionPlanner
 }
 
 func newStaticStepPlanner(planner actionPlanner) *staticStepPlanner {
@@ -74,15 +72,12 @@ func (p *staticStepPlanner) PlanStep(ctx context.Context, input plannerStepReque
 	if p == nil || p.planner == nil {
 		return plannerStepResponse{}, errors.New("planner is not configured")
 	}
-	if !p.cachedLoaded {
-		actions, err := p.planner.Plan(ctx, input.Goal, input.PageSnapshot)
-		if err != nil {
-			return plannerStepResponse{}, err
-		}
-		p.cached = sanitizePlannedActions(actions)
-		p.cachedLoaded = true
+	actions, err := p.planner.Plan(ctx, input.Goal, input.PageSnapshot)
+	if err != nil {
+		return plannerStepResponse{}, err
 	}
-	if len(p.cached) == 0 {
+	actions = sanitizePlannedActions(actions)
+	if len(actions) == 0 {
 		return plannerStepResponse{
 			Stop:       true,
 			StopReason: "no_actions",
@@ -93,17 +88,48 @@ func (p *staticStepPlanner) PlanStep(ctx context.Context, input plannerStepReque
 	if offset < 0 {
 		offset = 0
 	}
-	if offset >= len(p.cached) {
+	if offset < len(actions) {
+		next := actions[offset]
 		return plannerStepResponse{
-			Stop:       true,
-			StopReason: "plan_exhausted",
+			NextAction: &next,
 		}, nil
 	}
 
-	next := p.cached[offset]
+	used := make(map[string]struct{}, len(input.PriorSteps))
+	for _, prior := range input.PriorSteps {
+		candidate := sanitizePlannedActions([]executeAction{prior.Action})
+		if len(candidate) == 0 {
+			continue
+		}
+		used[plannerActionSignature(candidate[0])] = struct{}{}
+	}
+	for _, candidate := range actions {
+		signature := plannerActionSignature(candidate)
+		if _, exists := used[signature]; exists {
+			continue
+		}
+		next := candidate
+		return plannerStepResponse{
+			NextAction: &next,
+		}, nil
+	}
+
 	return plannerStepResponse{
-		NextAction: &next,
+		Stop:       true,
+		StopReason: "plan_exhausted",
 	}, nil
+}
+
+func plannerActionSignature(action executeAction) string {
+	normalized := normalizeTraceAction(action)
+	return strings.Join([]string{
+		normalized.Type,
+		normalized.Selector,
+		normalized.Text,
+		fmt.Sprintf("%d", normalized.TimeoutMS),
+		fmt.Sprintf("%d", normalized.DelayMS),
+		fmt.Sprintf("%d", normalized.Pixels),
+	}, "|")
 }
 
 type heuristicPlanner struct{}

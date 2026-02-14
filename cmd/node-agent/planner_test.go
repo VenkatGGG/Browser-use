@@ -3,12 +3,36 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+type snapshotPlan struct {
+	matchHost string
+	actions   []executeAction
+}
+
+type hostAwarePlanner struct {
+	plans []snapshotPlan
+	calls int
+}
+
+func (p *hostAwarePlanner) Name() string { return "host_aware_test" }
+
+func (p *hostAwarePlanner) Plan(_ context.Context, _ string, snapshot pageSnapshot) ([]executeAction, error) {
+	p.calls++
+	host := snapshotHost(snapshot.URL)
+	for _, plan := range p.plans {
+		if host == strings.ToLower(strings.TrimSpace(plan.matchHost)) {
+			return append([]executeAction(nil), plan.actions...), nil
+		}
+	}
+	return nil, fmt.Errorf("unexpected host: %s", host)
+}
 
 func TestParseSearchQuery(t *testing.T) {
 	t.Parallel()
@@ -174,12 +198,18 @@ func TestStaticStepPlannerSequencesActions(t *testing.T) {
 		t.Fatalf("unexpected second step decision: %+v", second)
 	}
 
-	req.PriorSteps = append(req.PriorSteps,
-		plannerStepTrace{Index: 2, Action: *second.NextAction, Status: "planned"},
-		plannerStepTrace{Index: 3, Action: executeAction{Type: "press_enter", Selector: "input[name=\"q\"]"}, Status: "planned"},
-		plannerStepTrace{Index: 4, Action: executeAction{Type: "wait_for_url_contains", Text: "browser use"}, Status: "planned"},
-		plannerStepTrace{Index: 5, Action: executeAction{Type: "wait", DelayMS: 800}, Status: "planned"},
-	)
+	plannedActions, err := basePlanner.Plan(context.Background(), req.Goal, snapshot)
+	if err != nil {
+		t.Fatalf("Plan returned error: %v", err)
+	}
+	req.PriorSteps = req.PriorSteps[:0]
+	for idx, action := range sanitizePlannedActions(plannedActions) {
+		req.PriorSteps = append(req.PriorSteps, plannerStepTrace{
+			Index:  idx + 1,
+			Action: action,
+			Status: "planned",
+		})
+	}
 	exhausted, err := stepPlanner.PlanStep(context.Background(), req)
 	if err != nil {
 		t.Fatalf("PlanStep exhausted returned error: %v", err)
@@ -203,6 +233,70 @@ func TestStaticStepPlannerStopsWhenNoActions(t *testing.T) {
 	}
 	if !decision.Stop || decision.StopReason != "no_actions" {
 		t.Fatalf("expected no_actions stop, got %+v", decision)
+	}
+}
+
+func TestStaticStepPlannerReplansFromLatestSnapshot(t *testing.T) {
+	t.Parallel()
+
+	basePlanner := &hostAwarePlanner{
+		plans: []snapshotPlan{
+			{
+				matchHost: "example.com",
+				actions: []executeAction{
+					{Type: "click", Selector: "#search"},
+					{Type: "type", Selector: "#search", Text: "browser use"},
+				},
+			},
+			{
+				matchHost: "shop.example.com",
+				actions: []executeAction{
+					{Type: "extract_text", Selector: ".price", Text: "price"},
+				},
+			},
+		},
+	}
+	stepPlanner := newStaticStepPlanner(basePlanner)
+
+	first, err := stepPlanner.PlanStep(context.Background(), plannerStepRequest{
+		Goal:       "find price",
+		CurrentURL: "https://example.com",
+		PageSnapshot: pageSnapshot{
+			URL: "https://example.com",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanStep first returned error: %v", err)
+	}
+	if first.NextAction == nil || first.NextAction.Type != "click" {
+		t.Fatalf("unexpected first action: %+v", first)
+	}
+
+	second, err := stepPlanner.PlanStep(context.Background(), plannerStepRequest{
+		Goal:       "find price",
+		CurrentURL: "https://shop.example.com/product",
+		PageSnapshot: pageSnapshot{
+			URL: "https://shop.example.com/product",
+		},
+		PriorSteps: []plannerStepTrace{
+			{
+				Index:  1,
+				Action: *first.NextAction,
+				Status: "succeeded",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanStep second returned error: %v", err)
+	}
+	if second.Stop || second.NextAction == nil {
+		t.Fatalf("expected second decision action, got %+v", second)
+	}
+	if second.NextAction.Type != "extract_text" {
+		t.Fatalf("expected replanned extract_text, got %+v", second.NextAction)
+	}
+	if basePlanner.calls != 2 {
+		t.Fatalf("expected planner to be called twice, got %d", basePlanner.calls)
 	}
 }
 

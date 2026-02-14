@@ -370,7 +370,7 @@ NODE_AGENT_PLANNER_ENDPOINT_URL=https://generativelanguage.googleapis.com/v1beta
 
 Goal: move from one-shot planning to a closed loop where the planner observes action results and re-plans until the task reaches success, failure, or a step budget limit.
 
-### Phase 0: Contracts and Limits (planned)
+### Phase 0: Contracts and Limits (complete)
 1. Define a `plan_step` contract:
    - Input: `{goal, current_url, page_snapshot, prior_steps, last_action_result}`
    - Output: `{next_action, stop, stop_reason}`
@@ -379,27 +379,27 @@ Goal: move from one-shot planning to a closed loop where the planner observes ac
    - `max_planner_failures` (for example: 2)
 3. Persist per-step planner metadata into task trace.
 
-### Phase 1: Observe -> Act -> Re-plan Loop (planned)
+### Phase 1: Observe -> Act -> Re-plan Loop (complete)
 1. Execute exactly one action per planner round.
 2. After each action, capture a fresh compact page snapshot.
 3. Feed the latest result into planner for the next decision.
 4. Stop early when planner returns `stop=true`.
 
-### Phase 2: Structured Action Result Feedback (planned)
+### Phase 2: Structured Action Result Feedback (next)
 1. Standardize result payloads for actions:
    - `click`: clicked selector + focus/url delta
    - `type`: typed text + value verification
    - `extract_text`: extracted output + validation status
 2. Add blocker-aware feedback (`captcha`, `human_verification_required`) so planner can terminate instead of looping.
 
-### Phase 3: Reliability and Guardrails (planned)
+### Phase 3: Reliability and Guardrails (next)
 1. Re-plan only on safe conditions; avoid infinite oscillation.
 2. Add loop-detection heuristics:
    - repeated same action/selector
    - repeated identical URL/title snapshots
 3. Add deterministic fallback path when planner is unavailable.
 
-### Phase 4: Evaluation Harness (planned)
+### Phase 4: Evaluation Harness (next)
 1. Add fixture scenarios for multi-step tasks:
    - search -> click result -> extract price/title
 2. Track metrics:
@@ -566,6 +566,7 @@ browser-use/
 - Task responses include `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payloads include `attempt`, `max_retries`, `next_retry_at`, `trace`, and `extracted_outputs`.
 - Task trace steps now include planner metadata (`planner.mode`, `planner.round`, `planner.failure_count`, `planner.stop_reason`) for phase-0 re-planning observability.
+- Goal-driven runs now execute in closed-loop planner rounds (`observe -> plan one step -> act -> observe`) instead of one-shot full-plan execution.
 - Dashboard task submission now auto-creates a session when `session_id` is omitted, using `tenant_id` if provided.
 - The `POST /task` convenience endpoint waits for task completion by default. Use `POST /v1/tasks` for async queuing.
 - `X-Trace-Id: trc_<task_id>` is returned in task creation responses for log correlation.
