@@ -45,6 +45,8 @@ type config struct {
 	PlannerTimeout     time.Duration
 	PlannerMaxElements int
 	TraceScreenshots   bool
+	HumanizeMode       string
+	HumanizeSeed       int64
 	EgressMode         string
 	EgressAllowHosts   []string
 }
@@ -137,6 +139,7 @@ type browserExecutor struct {
 	executeTimeout   time.Duration
 	planner          actionPlanner
 	traceScreenshots bool
+	humanizer        *humanizer
 	egressMode       string
 	egressAllowHosts []string
 	mu               sync.Mutex
@@ -156,6 +159,7 @@ func newBrowserExecutor(cfg config) *browserExecutor {
 			MaxElements: cfg.PlannerMaxElements,
 		}),
 		traceScreenshots: cfg.TraceScreenshots,
+		humanizer:        newHumanizer(cfg.HumanizeMode, cfg.HumanizeSeed),
 		egressMode:       normalizeEgressMode(cfg.EgressMode),
 		egressAllowHosts: append([]string(nil), cfg.EgressAllowHosts...),
 	}
@@ -442,6 +446,15 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
 			return "", err
 		}
+		if e.humanizer != nil {
+			if err := e.humanizer.Click(actionCtx, client, selector); err == nil {
+				return "", nil
+			} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return "", err
+			} else {
+				log.Printf("humanized click failed; falling back to deterministic click: selector=%q err=%v", selector, err)
+			}
+		}
 		return "", client.ClickSelector(actionCtx, selector)
 	case "type":
 		selector := strings.TrimSpace(action.Selector)
@@ -451,8 +464,20 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		if err := client.WaitForSelector(actionCtx, selector, timeout); err != nil {
 			return "", err
 		}
-		if err := client.TypeIntoSelector(actionCtx, selector, action.Text); err != nil {
-			return "", err
+		typed := false
+		if e.humanizer != nil {
+			if err := e.humanizer.Type(actionCtx, client, selector, action.Text); err == nil {
+				typed = true
+			} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return "", err
+			} else {
+				log.Printf("humanized type failed; falling back to deterministic type: selector=%q err=%v", selector, err)
+			}
+		}
+		if !typed {
+			if err := client.TypeIntoSelector(actionCtx, selector, action.Text); err != nil {
+				return "", err
+			}
 		}
 		if strings.TrimSpace(action.Text) != "" {
 			if err := client.WaitForSelectorValueContains(actionCtx, selector, action.Text, timeout); err != nil {
@@ -472,8 +497,20 @@ func (e *browserExecutor) applyAction(ctx context.Context, client *cdp.Client, a
 		if direction == "" {
 			direction = "down"
 		}
-		if err := client.Scroll(actionCtx, direction, int(action.Pixels)); err != nil {
-			return "", err
+		scrolled := false
+		if e.humanizer != nil {
+			if err := e.humanizer.Scroll(actionCtx, client, direction, int(action.Pixels)); err == nil {
+				scrolled = true
+			} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return "", err
+			} else {
+				log.Printf("humanized scroll failed; falling back to deterministic scroll: direction=%q err=%v", direction, err)
+			}
+		}
+		if !scrolled {
+			if err := client.Scroll(actionCtx, direction, int(action.Pixels)); err != nil {
+				return "", err
+			}
 		}
 		if delay := boundedActionDelay(int(action.DelayMS), 0); delay > 0 {
 			select {
@@ -831,6 +868,8 @@ func loadConfig() config {
 		PlannerTimeout:     durationOrDefault("NODE_AGENT_PLANNER_TIMEOUT", 8*time.Second),
 		PlannerMaxElements: intOrDefault("NODE_AGENT_PLANNER_MAX_ELEMENTS", 48),
 		TraceScreenshots:   boolOrDefault("NODE_AGENT_TRACE_SCREENSHOTS", false),
+		HumanizeMode:       envOrDefault("NODE_AGENT_HUMANIZE_MODE", "off"),
+		HumanizeSeed:       int64OrDefault("NODE_AGENT_HUMANIZE_SEED", 0),
 		EgressMode:         envOrDefault("NODE_AGENT_EGRESS_MODE", "open"),
 		EgressAllowHosts:   parseCSV(os.Getenv("NODE_AGENT_EGRESS_ALLOW_HOSTS")),
 	}
@@ -1109,7 +1148,20 @@ func intOrDefault(key string, fallback int) int {
 	if value == "" {
 		return fallback
 	}
+
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func int64OrDefault(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return fallback
 	}
