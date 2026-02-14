@@ -43,11 +43,27 @@ type plannerStepRequest struct {
 }
 
 type plannerStepTrace struct {
-	Index      int           `json:"index"`
-	Action     executeAction `json:"action"`
-	Status     string        `json:"status,omitempty"`
-	Error      string        `json:"error,omitempty"`
-	OutputText string        `json:"output_text,omitempty"`
+	Index      int                `json:"index"`
+	Action     executeAction      `json:"action"`
+	Status     string             `json:"status,omitempty"`
+	Error      string             `json:"error,omitempty"`
+	OutputText string             `json:"output_text,omitempty"`
+	Result     *plannerStepResult `json:"result,omitempty"`
+}
+
+type plannerStepResult struct {
+	ClickedSelector string `json:"clicked_selector,omitempty"`
+	FocusVerified   bool   `json:"focus_verified,omitempty"`
+	TypedSelector   string `json:"typed_selector,omitempty"`
+	TypedText       string `json:"typed_text,omitempty"`
+	ValueVerified   bool   `json:"value_verified,omitempty"`
+	URLBefore       string `json:"url_before,omitempty"`
+	URLAfter        string `json:"url_after,omitempty"`
+	URLChanged      bool   `json:"url_changed,omitempty"`
+	ExtractedText   string `json:"extracted_text,omitempty"`
+	ExtractedValid  bool   `json:"extracted_valid,omitempty"`
+	BlockerType     string `json:"blocker_type,omitempty"`
+	BlockerMessage  string `json:"blocker_message,omitempty"`
 }
 
 type plannerStepResponse struct {

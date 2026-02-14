@@ -385,7 +385,7 @@ Goal: move from one-shot planning to a closed loop where the planner observes ac
 3. Feed the latest result into planner for the next decision.
 4. Stop early when planner returns `stop=true`.
 
-### Phase 2: Structured Action Result Feedback (next)
+### Phase 2: Structured Action Result Feedback (in progress)
 1. Standardize result payloads for actions:
    - `click`: clicked selector + focus/url delta
    - `type`: typed text + value verification
@@ -567,6 +567,7 @@ browser-use/
 - Task status payloads include `attempt`, `max_retries`, `next_retry_at`, `trace`, and `extracted_outputs`.
 - Task trace steps now include planner metadata (`planner.mode`, `planner.round`, `planner.failure_count`, `planner.stop_reason`) for phase-0 re-planning observability.
 - Goal-driven runs now execute in closed-loop planner rounds (`observe -> plan one step -> act -> observe`) instead of one-shot full-plan execution.
+- Planner round context now includes structured `last_action_result.result` feedback (URL delta, click focus check, type value verification, extract validation, blocker fields).
 - Dashboard task submission now auto-creates a session when `session_id` is omitted, using `tenant_id` if provided.
 - The `POST /task` convenience endpoint waits for task completion by default. Use `POST /v1/tasks` for async queuing.
 - `X-Trace-Id: trc_<task_id>` is returned in task creation responses for log correlation.

@@ -309,7 +309,7 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 				Round:        round,
 				FailureCount: plannerFailureCount,
 			}
-			step, flowErr := e.executeActionStep(runCtx, client, len(trace)+1, sanitized[0], trace, plannerMeta)
+			step, result, flowErr := e.executeActionStep(runCtx, client, len(trace)+1, sanitized[0], trace, plannerMeta)
 			trace = append(trace, step)
 			if flowErr != nil {
 				if trace[len(trace)-1].Planner != nil {
@@ -325,11 +325,18 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 				Status:     trace[len(trace)-1].Status,
 				Error:      trace[len(trace)-1].Error,
 				OutputText: trace[len(trace)-1].OutputText,
+				Result:     result,
 			}
 			prior = append(prior, executed)
-			last = &executed
 
 			if blocked, response := e.detectBlocker(runCtx, client); blocked {
+				if executed.Result == nil {
+					executed.Result = &plannerStepResult{}
+				}
+				executed.Result.BlockerType = strings.TrimSpace(response.BlockerType)
+				executed.Result.BlockerMessage = strings.TrimSpace(response.BlockerMessage)
+				prior[len(prior)-1] = executed
+				last = &prior[len(prior)-1]
 				plannerStopReason = "blocker_detected"
 				if trace[len(trace)-1].Planner != nil {
 					trace[len(trace)-1].Planner.StopReason = plannerStopReason
@@ -337,6 +344,7 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 				response.Trace = append([]executeTraceStep(nil), trace...)
 				return response, nil
 			}
+			last = &prior[len(prior)-1]
 
 			nextSnapshot, err := capturePageSnapshot(runCtx, client)
 			if err != nil {
@@ -376,7 +384,7 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 	} else {
 		executionActions := append([]executeAction(nil), actions...)
 		for index, action := range executionActions {
-			step, flowErr := e.executeActionStep(runCtx, client, index+1, action, trace, nil)
+			step, _, flowErr := e.executeActionStep(runCtx, client, index+1, action, trace, nil)
 			trace = append(trace, step)
 			if flowErr != nil {
 				return flowErr.result, flowErr
@@ -410,7 +418,7 @@ func (e *browserExecutor) ExecuteWithActions(ctx context.Context, targetURL, goa
 	}, nil
 }
 
-func (e *browserExecutor) executeActionStep(ctx context.Context, client *cdp.Client, index int, action executeAction, trace []executeTraceStep, planner *plannerTraceMetadata) (executeTraceStep, *executeFlowError) {
+func (e *browserExecutor) executeActionStep(ctx context.Context, client *cdp.Client, index int, action executeAction, trace []executeTraceStep, planner *plannerTraceMetadata) (executeTraceStep, *plannerStepResult, *executeFlowError) {
 	started := time.Now().UTC()
 	step := executeTraceStep{
 		Index:     index,
@@ -418,6 +426,12 @@ func (e *browserExecutor) executeActionStep(ctx context.Context, client *cdp.Cli
 		Status:    "succeeded",
 		StartedAt: started,
 		Planner:   clonePlannerTraceMetadata(planner),
+	}
+	var result *plannerStepResult
+	if step.Planner != nil {
+		result = &plannerStepResult{
+			URLBefore: captureCurrentURL(ctx, client),
+		}
 	}
 
 	outputText, err := e.applyAction(ctx, client, action)
@@ -432,7 +446,12 @@ func (e *browserExecutor) executeActionStep(ctx context.Context, client *cdp.Cli
 		}
 		traceWithStep := append(append([]executeTraceStep(nil), trace...), step)
 		partial := e.buildPartialExecuteResponse(ctx, client, traceWithStep)
-		return step, &executeFlowError{
+		if result != nil {
+			result.URLAfter = captureCurrentURL(ctx, client)
+			result.URLChanged = result.URLAfter != "" && result.URLAfter != result.URLBefore
+			annotatePlannerStepResult(ctx, client, result, step.Action, step.OutputText, false)
+		}
+		return step, result, &executeFlowError{
 			message: fmt.Sprintf("action %d (%s) failed: %v", index, action.Type, err),
 			result:  partial,
 		}
@@ -449,11 +468,23 @@ func (e *browserExecutor) executeActionStep(ctx context.Context, client *cdp.Cli
 			step.Error = policyErr.Error()
 			traceWithStep := append(append([]executeTraceStep(nil), trace...), step)
 			partial := e.buildPartialExecuteResponse(ctx, client, traceWithStep)
-			return step, &executeFlowError{
+			if result != nil {
+				result.URLAfter = strings.TrimSpace(currentURL)
+				result.URLChanged = result.URLAfter != "" && result.URLAfter != result.URLBefore
+				annotatePlannerStepResult(ctx, client, result, step.Action, step.OutputText, false)
+			}
+			return step, result, &executeFlowError{
 				message: fmt.Sprintf("action %d (%s) failed: %v", index, action.Type, policyErr),
 				result:  partial,
 			}
 		}
+	}
+	if result != nil {
+		if result.URLAfter == "" {
+			result.URLAfter = captureCurrentURL(ctx, client)
+		}
+		result.URLChanged = result.URLAfter != "" && result.URLAfter != result.URLBefore
+		annotatePlannerStepResult(ctx, client, result, step.Action, step.OutputText, true)
 	}
 
 	if e.traceScreenshots {
@@ -462,7 +493,7 @@ func (e *browserExecutor) executeActionStep(ctx context.Context, client *cdp.Cli
 		}
 	}
 
-	return step, nil
+	return step, result, nil
 }
 
 func (e *browserExecutor) buildPartialExecuteResponse(ctx context.Context, client *cdp.Client, trace []executeTraceStep) executeResponse {
@@ -493,6 +524,93 @@ func clonePlannerTraceMetadata(meta *plannerTraceMetadata) *plannerTraceMetadata
 	}
 	cloned := *meta
 	return &cloned
+}
+
+func captureCurrentURL(ctx context.Context, client *cdp.Client) string {
+	currentURL, err := client.EvaluateString(ctx, "window.location.href")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(currentURL)
+}
+
+func annotatePlannerStepResult(ctx context.Context, client *cdp.Client, result *plannerStepResult, action executeAction, outputText string, succeeded bool) {
+	if result == nil {
+		return
+	}
+	normalized := normalizeTraceAction(action)
+	switch normalized.Type {
+	case "click":
+		result.ClickedSelector = normalized.Selector
+		result.FocusVerified = succeeded && selectorHasFocus(ctx, client, normalized.Selector)
+	case "type":
+		result.TypedSelector = normalized.Selector
+		result.TypedText = trimSnippet(normalized.Text, 120)
+		result.ValueVerified = succeeded && selectorValueContains(ctx, client, normalized.Selector, normalized.Text)
+	case "extract_text":
+		result.ExtractedText = trimSnippet(strings.TrimSpace(outputText), 240)
+		result.ExtractedValid = succeeded && isExtractedValueValid(normalized.Text, outputText)
+	}
+}
+
+func selectorHasFocus(ctx context.Context, client *cdp.Client, selector string) bool {
+	trimmed := strings.TrimSpace(selector)
+	if trimmed == "" {
+		return false
+	}
+	script := fmt.Sprintf(`(() => {
+		try {
+			const el = document.querySelector(%s);
+			return Boolean(el) && document.activeElement === el;
+		} catch (_) {
+			return false;
+		}
+	})()`, strconv.Quote(trimmed))
+	raw, err := client.EvaluateAny(ctx, script)
+	if err != nil {
+		return false
+	}
+	switch value := raw.(type) {
+	case bool:
+		return value
+	case string:
+		return strings.EqualFold(strings.TrimSpace(value), "true")
+	default:
+		return false
+	}
+}
+
+func selectorValueContains(ctx context.Context, client *cdp.Client, selector, expected string) bool {
+	trimmedSelector := strings.TrimSpace(selector)
+	trimmedExpected := strings.TrimSpace(expected)
+	if trimmedSelector == "" {
+		return false
+	}
+	if trimmedExpected == "" {
+		return true
+	}
+	script := fmt.Sprintf(`(() => {
+		try {
+			const el = document.querySelector(%s);
+			if (!el) return false;
+			const raw = typeof el.value === "string" ? el.value : (el.textContent || "");
+			return raw.toLowerCase().includes(%s.toLowerCase());
+		} catch (_) {
+			return false;
+		}
+	})()`, strconv.Quote(trimmedSelector), strconv.Quote(trimmedExpected))
+	raw, err := client.EvaluateAny(ctx, script)
+	if err != nil {
+		return false
+	}
+	switch value := raw.(type) {
+	case bool:
+		return value
+	case string:
+		return strings.EqualFold(strings.TrimSpace(value), "true")
+	default:
+		return false
+	}
 }
 
 func (e *browserExecutor) detectBlocker(ctx context.Context, client *cdp.Client) (bool, executeResponse) {
@@ -911,6 +1029,10 @@ func clonePlannerStepTrace(step *plannerStepTrace) *plannerStepTrace {
 		return nil
 	}
 	cloned := *step
+	if step.Result != nil {
+		result := *step.Result
+		cloned.Result = &result
+	}
 	return &cloned
 }
 
