@@ -13,6 +13,7 @@ An AI agent-driven browser orchestration engine. A distributed system that auton
 - [API Reference](#api-reference)
 - [Dashboard](#dashboard)
 - [AI Agent Planner](#ai-agent-planner)
+- [Multi-Step Agentic Planning Plan](#multi-step-agentic-planning-plan)
 - [Configuration Reference](#configuration-reference)
 - [Security and Sandboxing](#security-and-sandboxing)
 - [Challenges and Anti-Bot Detection](#challenges-and-anti-bot-detection)
@@ -201,7 +202,7 @@ curl http://localhost:8080/v1/nodes
 ```bash
 curl -sS -X POST http://localhost:8080/task \
   -H 'Content-Type: application/json' \
-  -d '{"url":"https://example.com","goal":"open page and capture screenshot"}'
+  -d '{"tenant_id":"dashboard","url":"https://example.com","goal":"open page and capture screenshot"}'
 ```
 
 5. Run a task with explicit actions (no AI planner involved):
@@ -247,7 +248,7 @@ make dev-pool
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/v1/tasks` | Queue a task (returns `202 Accepted`) |
+| `POST` | `/v1/tasks` | Queue a task (returns `202 Accepted`; auto-creates `session_id` when omitted) |
 | `POST` | `/task` | Queue and wait for completion (returns `200 OK`) |
 | `GET` | `/v1/tasks/{id}` | Get task status, result, and trace |
 | `GET` | `/v1/tasks?limit=N` | List recent tasks |
@@ -287,7 +288,7 @@ The operator dashboard provides real-time visibility into the system:
 - Node fleet status with heartbeat and version metadata
 - Task feed with filtering by status, search, blockers, failures, and artifacts
 - Task detail panel with metadata, execution trace, lineage, and replay controls
-- Task submission form with session creation
+- Task submission form with automatic session creation per task
 - Execution trace panel with:
   - Step-level progress bar (succeeded/failed segments)
   - Action-type icons and rich summaries
@@ -365,6 +366,50 @@ NODE_AGENT_PLANNER_ENDPOINT_URL=https://generativelanguage.googleapis.com/v1beta
 
 ---
 
+## Multi-Step Agentic Planning Plan
+
+Goal: move from one-shot planning to a closed loop where the planner observes action results and re-plans until the task reaches success, failure, or a step budget limit.
+
+### Phase 0: Contracts and Limits (planned)
+1. Define a `plan_step` contract:
+   - Input: `{goal, current_url, page_snapshot, prior_steps, last_action_result}`
+   - Output: `{next_action, stop, stop_reason}`
+2. Add max limits:
+   - `max_planner_steps` (for example: 12)
+   - `max_planner_failures` (for example: 2)
+3. Persist per-step planner metadata into task trace.
+
+### Phase 1: Observe -> Act -> Re-plan Loop (planned)
+1. Execute exactly one action per planner round.
+2. After each action, capture a fresh compact page snapshot.
+3. Feed the latest result into planner for the next decision.
+4. Stop early when planner returns `stop=true`.
+
+### Phase 2: Structured Action Result Feedback (planned)
+1. Standardize result payloads for actions:
+   - `click`: clicked selector + focus/url delta
+   - `type`: typed text + value verification
+   - `extract_text`: extracted output + validation status
+2. Add blocker-aware feedback (`captcha`, `human_verification_required`) so planner can terminate instead of looping.
+
+### Phase 3: Reliability and Guardrails (planned)
+1. Re-plan only on safe conditions; avoid infinite oscillation.
+2. Add loop-detection heuristics:
+   - repeated same action/selector
+   - repeated identical URL/title snapshots
+3. Add deterministic fallback path when planner is unavailable.
+
+### Phase 4: Evaluation Harness (planned)
+1. Add fixture scenarios for multi-step tasks:
+   - search -> click result -> extract price/title
+2. Track metrics:
+   - `planner_rounds_per_task`
+   - `task_success_rate`
+   - `planner_replan_fail_rate`
+3. Add regression CI tests before enabling by default.
+
+---
+
 ## Configuration Reference
 
 ### Orchestrator
@@ -395,8 +440,6 @@ NODE_AGENT_PLANNER_ENDPOINT_URL=https://generativelanguage.googleapis.com/v1beta
 | `NODE_AGENT_PLANNER_TIMEOUT` | Planner request timeout | `30s` |
 | `NODE_AGENT_PLANNER_MAX_ELEMENTS` | Max DOM elements sent to planner | `50` |
 | `NODE_AGENT_TRACE_SCREENSHOTS` | Enable per-step trace screenshots | `false` |
-| `NODE_AGENT_HUMANIZE_MODE` | Human-like interaction mode: `off`, `balanced`, `aggressive` | `off` |
-| `NODE_AGENT_HUMANIZE_SEED` | Optional fixed random seed for reproducible motion | `0` |
 
 ---
 
@@ -444,18 +487,16 @@ These are planned improvements to reduce detection rates on protected sites:
 
 1. **Stealth patches**: Inject JavaScript at page load to override `navigator.webdriver`, spoof `navigator.plugins`, `navigator.languages`, and WebGL vendor strings. Similar to `puppeteer-extra-plugin-stealth`.
 2. **Chrome launch flag hardening**: Add `--disable-blink-features=AutomationControlled` and related flags to suppress automation indicators at the browser level.
-3. **Human-like interaction modeling**: Introduce randomized delays (50-300ms jitter) between actions, synthetic mouse movement paths with Bezier curves, and natural scroll velocity profiles.
-4. **Persistent browser profiles**: Use persistent user data directories with cookies, local storage, and browsing history to mimic a returning user rather than a fresh session.
-5. **TLS fingerprint alignment**: Investigate `curl-impersonate` or custom Chromium builds to match the TLS handshake of standard Chrome releases.
-6. **Proxy integration**: Support for residential proxy rotation to avoid IP-reputation-based blocking.
-7. **Captcha solving integration**: Optional integration with captcha solving services (2Captcha, hCaptcha solver) or vision-model-based solving for challenge pages.
+3. **Persistent browser profiles**: Use persistent user data directories with cookies, local storage, and browsing history to mimic a returning user rather than a fresh session.
+4. **TLS fingerprint alignment**: Investigate `curl-impersonate` or custom Chromium builds to match the TLS handshake of standard Chrome releases.
+5. **Proxy integration**: Support for residential proxy rotation to avoid IP-reputation-based blocking.
+6. **Captcha solving integration**: Optional integration with captcha solving services (2Captcha, hCaptcha solver) or vision-model-based solving for challenge pages.
 
 ---
 
 ## Roadmap
 
 - [ ] Stealth mode (anti-detection patches, launch flag hardening)
-- [ ] Human-like interaction modeling (jitter, mouse paths, scroll dynamics)
 - [ ] Persistent browser profiles
 - [ ] Proxy rotation support
 - [ ] Captcha solving integration
@@ -522,7 +563,7 @@ browser-use/
 - Sessions and task state are persisted in PostgreSQL. Queued tasks are reconciled from the database on runner startup.
 - Task responses include `screenshot_artifact_url`; `screenshot_base64` is used only as fallback when artifact storage fails.
 - Task status payloads include `attempt`, `max_retries`, `next_retry_at`, `trace`, and `extracted_outputs`.
-- Optional humanized action execution is available for `click`, `type`, and `scroll` using cursor paths, jitter, typing cadence, and scroll burst dynamics.
+- Dashboard task submission now auto-creates a session when `session_id` is omitted, using `tenant_id` if provided.
 - The `POST /task` convenience endpoint waits for task completion by default. Use `POST /v1/tasks` for async queuing.
 - `X-Trace-Id: trc_<task_id>` is returned in task creation responses for log correlation.
 - API key authentication is optional. Set `ORCHESTRATOR_API_KEY` and send via `X-API-Key` or `Authorization: Bearer <key>`.
